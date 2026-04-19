@@ -1,11 +1,23 @@
 # BrickBlaster — C/raylib port
 
-A faithful C port of **BrickBlaster**, a brick-breaker game released for
-MS-DOS on *Media Pocket 1999*, developed by the **Eclipse** demoscene
-team. Original source open-sourced under GPL v3 by the author in 2024
-and archived at [david4599/BrickBlaster](https://github.com/david4599/BrickBlaster).
+[![Upstream ASM source](https://img.shields.io/badge/upstream-david4599%2FBrickBlaster-blue?logo=github)](https://github.com/david4599/BrickBlaster)
+[![License: GPL v3](https://img.shields.io/badge/license-GPL_v3-blue.svg)](LICENSE)
+[![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
-This C port uses [raylib 5.0](https://www.raylib.com/) for rendering,
+> **Based on the original x86 assembly sources** of BrickBlaster,
+> released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demoscene
+> team and open-sourced under GPL v3 in 2024.
+> Upstream repo: **[david4599/BrickBlaster](https://github.com/david4599/BrickBlaster)** — contains the original
+> `MAIN.ASM`, `HISCORE.ASM`, `FONTE.ASM`, `EDITOR.ASM`, `FILE.ASM`,
+> `DRAW.ASM`, `MOUSE.ASM`, `Blaster.inc`, `Blaster.cfg` (FR / EN / ES)
+> and the Watcom/DirectX toolchain to rebuild the 1999 binary.
+>
+> This repo is a **C/raylib translation** of those sources, byte-exact
+> for all gameplay constants and file formats. Every non-trivial
+> function cites its ASM line in a comment.
+
+This port uses [raylib 5.0](https://www.raylib.com/) for rendering,
 audio, and input, and runs on Windows, macOS, Linux, and Android.
 
 ## What is BrickBlaster?
