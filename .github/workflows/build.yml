@@ -58,7 +58,7 @@ jobs:
           mkdir -p dist/${{ matrix.artifact }}
           cp build/${{ matrix.exe }} dist/${{ matrix.artifact }}/
           cp -r assets dist/${{ matrix.artifact }}/
-          cp README.md LICENSE dist/${{ matrix.artifact }}/
+          cp README.md LICENSE CHANGELOG.md dist/${{ matrix.artifact }}/
           cd dist && ${{ matrix.archive_cmd }} ${{ matrix.artifact }}.${{ matrix.archive_ext }} ${{ matrix.artifact }}
 
       - name: Stage artifact (Windows)
@@ -68,7 +68,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/${{ matrix.artifact }}
           Copy-Item build/Release/${{ matrix.exe }} dist/${{ matrix.artifact }}/
           Copy-Item -Recurse assets dist/${{ matrix.artifact }}/
-          Copy-Item README.md,LICENSE dist/${{ matrix.artifact }}/
+          Copy-Item README.md,LICENSE,CHANGELOG.md dist/${{ matrix.artifact }}/
           cd dist
           7z a ${{ matrix.artifact }}.${{ matrix.archive_ext }} ${{ matrix.artifact }}
 

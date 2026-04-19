@@ -166,6 +166,16 @@ This program comes with **ABSOLUTELY NO WARRANTY**. This is free
 software, and you are welcome to redistribute it under the conditions
 of the GPL v3.
 
+## Release notes
+
+Every tagged release has a corresponding entry in [CHANGELOG.md](CHANGELOG.md).
+
+**Release rule (enforced):** a PR that bumps the version or pushes a
+`vX.Y.Z` tag MUST add/update the matching `CHANGELOG.md` section BEFORE
+the tag is pushed. No changelog entry = no release. The workflow
+`.github/workflows/build.yml` ships the changelog alongside each
+binary artefact, and GitHub release notes are generated from it.
+
 ## Links
 
 - Upstream source + toolchain: [david4599/BrickBlaster](https://github.com/david4599/BrickBlaster)
