@@ -133,27 +133,28 @@ void monster_update(Monster *monsters)
             monsters[i].vy = -monsters[i].vy;
         }
 
-        /* Top wall special bounce: MAIN.ASM:3109-3115
-         *   cmp [sprite_pos_y],0  jg @@next      ; skip if not at top
-         *   inc [sprite_counter_3]
-         *   cmp [sprite_counter_3],32  jb @@next ; wait 32 frames
-         *   mov [sprite_counter_3],0
-         *   mov [sprite_sens_y],-1               ; unconditional write
+        /* Top-wall bounce.
          *
-         * F3-iter3-04: ASM cite MAIN.ASM:3115 is
-         *   mov [edx.sprite_sens_y],-1
-         * UNCONDITIONAL — not the iter 2 "if (vy<0) vy=-vy" conditional flip.
-         * ASM + raylib share the Y-down convention (sens_y=+2 falls for
-         * options). Write vy=-1 literal to mirror the ASM. */
+         * ASM MAIN.ASM:3497-3530 detect_colision_wall runs BEFORE move_ball
+         * and flips sens_y when (pos_y + sens_y) <= min_y (`jbe`). So in
+         * normal play the monster bounces off the ceiling automatically
+         * via wall collision — y>0 on the next check, counter_3 never
+         * accumulates.
+         *
+         * MAIN.ASM:3109-3115 is a 32-frame edge-case quirk: if the
+         * monster stays at y<=0 for 32 consecutive frames (only reachable
+         * if detect_colision_wall's bounce fails for some reason), force
+         * sens_y=-1. Writing -1 (up) when already at y<=0 is almost
+         * certainly an ASM typo for `neg sens_y` (flip) — the original
+         * dev's intent was to unstick the sprite. Taking -1 literally
+         * keeps it stuck (user-reported bug "monsters stuck at ceiling").
+         *
+         * We match the ASM's EFFECTIVE behaviour (bounce off ceiling) via
+         * the conditional flip that mirrors detect_colision_wall's
+         * inverse_sens_y path. */
         if (monsters[i].y <= 0) {
             monsters[i].y = 0;
-            monsters[i].top_bounce_ctr++;
-            if (monsters[i].top_bounce_ctr >= 32) {
-                monsters[i].top_bounce_ctr = 0;
-                monsters[i].vy = -1;  /* MAIN.ASM:3115 — unconditional write */
-            }
-        } else {
-            monsters[i].top_bounce_ctr = 0;
+            if (monsters[i].vy < 0) monsters[i].vy = -monsters[i].vy;
         }
 
         /* Animation tick — MAIN.ASM:3030  sprite_shape_speed = monster_speed (5) */
