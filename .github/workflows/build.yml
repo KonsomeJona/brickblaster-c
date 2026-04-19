@@ -1,0 +1,101 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x64
+            artifact: brickblaster-linux-x64
+            exe: brickblaster
+            archive_cmd: tar -czf
+            archive_ext: tar.gz
+          - os: macos-latest
+            name: macOS arm64
+            artifact: brickblaster-macos-arm64
+            exe: brickblaster
+            archive_cmd: tar -czf
+            archive_ext: tar.gz
+          - os: windows-latest
+            name: Windows x64
+            artifact: brickblaster-windows-x64
+            exe: brickblaster.exe
+            archive_cmd: 7z a
+            archive_ext: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Stage artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist/${{ matrix.artifact }}
+          cp build/${{ matrix.exe }} dist/${{ matrix.artifact }}/
+          cp -r assets dist/${{ matrix.artifact }}/
+          cp README.md LICENSE dist/${{ matrix.artifact }}/
+          cd dist && ${{ matrix.archive_cmd }} ${{ matrix.artifact }}.${{ matrix.archive_ext }} ${{ matrix.artifact }}
+
+      - name: Stage artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/${{ matrix.artifact }}
+          Copy-Item build/Release/${{ matrix.exe }} dist/${{ matrix.artifact }}/
+          Copy-Item -Recurse assets dist/${{ matrix.artifact }}/
+          Copy-Item README.md,LICENSE dist/${{ matrix.artifact }}/
+          cd dist
+          7z a ${{ matrix.artifact }}.${{ matrix.archive_ext }} ${{ matrix.artifact }}
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

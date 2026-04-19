@@ -1,0 +1,62 @@
+# Build output
+/build/
+/build-*/
+*.obj
+*.o
+*.exe
+*.dll
+*.dylib
+*.so
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+_deps/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Saved game data (stays local)
+/data/*.scr
+/data/custom_*.lv*
+
+# Screenshots / recordings
+/screenshots/
+bb_*.gif
+bb_*.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev artifacts (should not be committed)
+null
+playtest*.ps1
+capture.ps1
+pack_msix.ps1
+bb_screen*.png
+bb_screenshot.png
+
+# Reference clone of upstream ASM (optional, not shipped)
+/BrickBlaster-original/
+
+# Agent / tooling files
+AGENTS.md
+
+# Android signing (NEVER commit)
+*.keystore
+*.jks
+key.properties
+keystore.properties
+local.properties
+signing.properties
