@@ -1,4 +1,6 @@
-# BrickBlaster — C/raylib port
+# Brick Blaster — C/raylib port
+
+<img src="img/BrickBlaster_banner.png" alt="Brick Blaster Banner">
 
 [![Upstream ASM source](https://img.shields.io/badge/upstream-david4599%2FBrickBlaster-blue?logo=github)](https://github.com/david4599/BrickBlaster)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL_v3-blue.svg)](LICENSE)
