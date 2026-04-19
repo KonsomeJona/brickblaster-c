@@ -3,6 +3,7 @@
 <img src="img/BrickBlaster_banner.png" alt="Brick Blaster Banner">
 
 [![Upstream ASM source](https://img.shields.io/badge/upstream-david4599%2FBrickBlaster-blue?logo=github)](https://github.com/david4599/BrickBlaster)
+[![EOS Archive](https://img.shields.io/badge/archive-david4599%2FBrickBlaster--EOS--Archive-blue?logo=github)](https://github.com/david4599/BrickBlaster-EOS-Archive)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL_v3-blue.svg)](LICENSE)
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
@@ -14,6 +15,10 @@
 > `MAIN.ASM`, `HISCORE.ASM`, `FONTE.ASM`, `EDITOR.ASM`, `FILE.ASM`,
 > `DRAW.ASM`, `MOUSE.ASM`, `Blaster.inc`, `Blaster.cfg` (FR / EN / ES)
 > and the Watcom/DirectX toolchain to rebuild the 1999 binary.
+>
+> Companion archive: **[david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)** —
+> unmodified 1999 binaries and the **WinEOS** runtime (the Eclipse demoscene
+> team's DirectX wrapper that originally hosted BrickBlaster).
 >
 > This repo is a **C/raylib translation** of those sources, byte-exact
 > for all gameplay constants and file formats. Every non-trivial
@@ -158,7 +163,9 @@ via [Carapace (Softplace)](https://www.abandonware-france.org/compagnies/carapac
 **Source preservation & upstream archive (2024):**
 [David Blanc (david4599)](https://github.com/david4599) — built the
 modern Watcom/DirectX toolchain, documented the patch notes, and
-convinced Marc Radermacher to open-source the assembly.
+convinced Marc Radermacher to open-source the assembly. Also curator
+of [BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
+(unmodified 1999 binaries + WinEOS runtime).
 
 **C/raylib port (2026):** [Jonathan Odul](https://github.com/konsomejona)
 ([konsomejona](https://github.com/konsomejona)).
