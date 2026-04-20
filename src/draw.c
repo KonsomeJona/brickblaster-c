@@ -413,8 +413,8 @@ static void draw_background(DrawContext *dc, const Game *g) {
         ClearBackground(BLACK);
     }
 
-    /* Mask side panels — Eclipse world (set 1) backgrounds have bright
-     * red side panels in the source art.  Arcade (set 0) panels are textured but
+    /* Mask side panels — Arcade world (set 1) backgrounds have bright
+     * red side panels in the source art.  Space (set 0) panels are textured but
      * still distracting; both worlds mask to keep focus on the play field.
      * DRAW.ASM side-panel logic: panels outside PLAY_X1..PLAY_X2 are overdrawn.
      *

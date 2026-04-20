@@ -30,7 +30,7 @@ audio, and input, and runs on Windows, macOS, Linux, and Android.
 ## What is BrickBlaster?
 
 A polished Arkanoid-style brick breaker with:
-- **80 levels** across 2 worlds (Space, Eclipse)
+- **80 levels** across 2 worlds (Space, Arcade)
 - **24 power-ups** (multi-ball, iron ball, laser, magnetic paddle, ghost, teleporters, bonus/malus, …)
 - **Monsters** that spawn periodically and must be dodged or destroyed
 - **2-player** coop and versus (duel) modes
@@ -161,7 +161,7 @@ Published by [Media Pocket](https://www.abandonware-france.org/compagnies/media-
 via [Carapace (Softplace)](https://www.abandonware-france.org/compagnies/carapace-82/).
 
 **Source preservation & upstream archive (2024):**
-[David Blanc (david4599)](https://github.com/david4599) — built the
+[david4599](https://github.com/david4599) — built the
 modern Watcom/DirectX toolchain, documented the patch notes, and
 convinced Marc Radermacher to open-source the assembly. Also curator
 of [BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)

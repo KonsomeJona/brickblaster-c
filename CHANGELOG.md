@@ -94,7 +94,7 @@ _nothing yet_
   team) using raylib 5.0 for rendering / audio / input / windowing.
 - Windows x64 (MSVC), Linux x64 (GCC/Clang), macOS arm64, Android (NDK)
   supported.
-- 80 original levels across 2 worlds (Space, Eclipse), byte-compatible
+- 80 original levels across 2 worlds (Space, Arcade), byte-compatible
   with the 1999 `.lv0` / `.lv1` / `.lv2` format.
 - 24 power-ups byte-identical to the ASM `struc_options` table
   (multi-ball, laser, magnetic, iron ball, ghost, night mode, teleporter,
