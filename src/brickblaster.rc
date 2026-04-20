@@ -1,4 +1,4 @@
 // BrickBlaster Windows resource file
 // GLFW/raylib looks for icon resource ID 32512 (IDI_APPLICATION) at startup
 // to set the window class icon — this makes it appear in the taskbar.
-32512 ICON "../assets/takohi/Icon.ico"
+32512 ICON "../assets/blaster.ico"

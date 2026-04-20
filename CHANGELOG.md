@@ -20,7 +20,14 @@ _nothing yet_
 _nothing yet_
 
 ### Fixed
-_nothing yet_
+- **Windows taskbar icon still showed TakoHi in 0.1.1**: the runtime
+  `SetWindowIcon()` call in `main.c:655` was correctly switched to
+  `assets/blaster_icon.png`, but `src/brickblaster.rc` (the Win32 resource
+  embedded into the `.exe` at link time, used by GLFW for `IDI_APPLICATION`
+  / taskbar / Alt-Tab) still pointed to `assets/takohi/Icon.ico`. Repointed
+  to `assets/blaster.ico`. The TakoHi logo remains in the intro splash
+  (`screen_intro.c`) — GPL v3 explicitly permits attribution of the porter
+  alongside the original work.
 
 ---
 
