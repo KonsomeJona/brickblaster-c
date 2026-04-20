@@ -320,7 +320,17 @@ int powerup_duration(PowerupType type)
         case POWERUP_FAST_BALL:   /* MAIN.ASM:6621  option_fast_ball_p  */
         case POWERUP_IRON_BALL:   /* MAIN.ASM:6453  option_iron_ball_p  */
         case POWERUP_TELEPOD:     /* MAIN.ASM:6470  option_telepod_p    */
-        case POWERUP_NIGHT:       /* MAIN.ASM:6641  option_night_p      */
+        case POWERUP_NIGHT:       /* MAIN.ASM:6641  option_night_p — count
+                                   * set by shared pipeline (MAIN.ASM:5691),
+                                   * NOT by the handler itself. option_night_p
+                                   * clears current_option back to Off but
+                                   * count keeps ticking; @@current_option_off
+                                   * eventually calls init_palette → clears
+                                   * night_flag. Kept in timed list so that
+                                   * collecting NIGHT while another timed
+                                   * option is active properly deactivates
+                                   * the prior (implicit in ASM via shared
+                                   * pipeline overwrite). */
         case POWERUP_SMALL_SHIP:  /* MAIN.ASM:6491  option_small_ship_p */
         case POWERUP_LARGE_SHIP:  /* MAIN.ASM:6500  option_large_ship_p */
         case POWERUP_REVERSE:     /* MAIN.ASM:6562  option_reverse_p    */

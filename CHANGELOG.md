@@ -24,6 +24,35 @@ _nothing yet_
 
 ---
 
+## [0.1.3] — 2026-04-20
+
+### Fixed
+- **NIGHT powerup (dark mode) left `night_active` stuck after being replaced
+  by another timed powerup**: our port was setting `current_option = NIGHT`
+  + `current_option_count = 600` on collection, and only clearing
+  `night_active` in `deactivate_current_option` when the switch case
+  matched `POWERUP_NIGHT`. If the player collected e.g. SLOW_BALL while
+  NIGHT was active, the NIGHT timer got overwritten and
+  `deactivate_current_option` later fired on `POWERUP_SLOW_BALL` — never
+  clearing `night_active`, trapping the screen in the dark overlay for
+  the rest of the level.
+  Re-read MAIN.ASM:5687-5691 (shared collection pipeline) + 6641-6699
+  (`option_night_p`) + 6295-6336 (`detect_current_option_end`) +
+  6667-6677 (`detect_init_palette`): NIGHT sets `option_night_flag=On`
+  and then clears `current_option` back to Off (line 6659), while
+  `current_option_count` keeps the 600 frames set by the shared pipeline.
+  Palette is restored either when that count hits 0 (`init_palette` from
+  `@@current_option_off`, line 6327 → 6684 clears `option_night_flag`)
+  or when another timed option is collected mid-NIGHT
+  (`detect_init_palette` sees flag On + current_option != Off → clears
+  flag, line 6674). Ported: `game.c::apply_powerup` NIGHT case no longer
+  sets `current_option = POWERUP_NIGHT`; `deactivate_current_option`
+  clears `night_active` unconditionally at the tail (mirrors
+  `init_palette`); added `detect_init_palette` equivalent in
+  `tick_option_timer`.
+
+---
+
 ## [0.1.2] — 2026-04-20
 
 ### Fixed
@@ -93,7 +122,8 @@ _nothing yet_
 ### Licence
 - GPL v3 — inherited from upstream david4599/BrickBlaster.
 
-[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/KonsomeJona/brickblaster-c/releases/tag/v0.1.0

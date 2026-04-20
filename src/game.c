@@ -659,15 +659,18 @@ static void deactivate_current_option(Game *g) {
      * tracked via current_option — they are per-paddle (Paddle.laser_timer /
      * size_timer / reverse_timer) and ticked down independently in
      * tick_option_timer, so one paddle collecting a shape/laser does not
-     * cancel the other's active effect. See MAIN.ASM:6491,6500,6509-6603,6562. */
-    case POWERUP_NIGHT:
-        g->night_active = 0;
-        break;
+     * cancel the other's active effect. See MAIN.ASM:6491,6500,6509-6603,6562.
+     *
+     * POWERUP_NIGHT is also not tracked via current_option (see
+     * MAIN.ASM:6641-6663 option_night_p / apply_powerup). Night is cleared
+     * unconditionally below, mirroring init_palette's `mov option_night_flag,Off`
+     * (MAIN.ASM:6684) called from @@current_option_off (MAIN.ASM:6327). */
     default:
         break;
     }
     g->current_option_count = 0;
     g->current_option = POWERUP_COUNT;
+    g->night_active = 0;  /* MAIN.ASM:6684 init_palette clears option_night_flag */
 }
 
 /* --------------------------------------------------------------------------
@@ -967,9 +970,24 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         owner_paddle->reverse_timer = (duration > 0) ? duration : DELAI_OPTION;
         break;
     case POWERUP_NIGHT:
+        /* MAIN.ASM:6641-6663 option_night_p.
+         * The shared collection pipeline (MAIN.ASM:5687-5691) has already
+         * set current_option=NIGHT and current_option_count=DELAI_OPTION (600).
+         * option_night_p then sets option_night_flag=On (darkens palette +
+         * x2 score FONTE.ASM:48-50,92-94) and resets current_option back to
+         * Off (line 6659) — but LEAVES current_option_count at 600, so the
+         * count keeps ticking and eventually triggers @@current_option_off
+         * (MAIN.ASM:6327) which calls init_palette → clears night_flag.
+         *
+         * Two restoration paths:
+         *   1. 600-frame timer expiry via detect_current_option_end.
+         *   2. Another timed powerup collected mid-NIGHT → detect_init_palette
+         *      (MAIN.ASM:6667) sees night_flag=On + current_option!=Off and
+         *      clears night early. */
+        if (g->night_active) break;                /* ASM:6644-6645 already-on guard */
         g->night_active = 1;
-        g->current_option = type;
-        g->current_option_count = (duration > 0) ? duration : DELAI_OPTION;
+        g->current_option = POWERUP_COUNT;         /* ASM:6659 current_option=Off */
+        g->current_option_count = DELAI_OPTION;    /* ASM:5691 via shared pipeline */
         if (g->audio) audio_play(g->audio, SFX_NIGHT);
         break;
 
@@ -1098,12 +1116,22 @@ static void tick_option_timer(Game *g) {
         if (g->paddle_2.reverse_timer == 0) g->paddle_2.reversed = 0;
     }
 
+    /* MAIN.ASM:6667-6677 detect_init_palette — if night is on AND another
+     * timed powerup is active, clear night (palette restored on next draw
+     * since night_active controls the overlay in draw.c). Ported inline
+     * here because detect_init_palette runs every frame in ASM's main loop
+     * (MAIN.ASM:1078), same cadence as our tick. */
+    if (g->night_active && g->current_option != POWERUP_COUNT) {
+        g->night_active = 0;
+    }
+
     if (g->current_option_count <= 0) return;
     g->current_option_count--;
     if (g->current_option_count > 0) return;
 
     /* Timer expired — deactivate the timed powerup effect.
-     * MAIN.ASM:6295-6336  sets current_option=Off and restores defaults. */
+     * MAIN.ASM:6295-6336  sets current_option=Off and restores defaults.
+     * Also clears night_active (init_palette, MAIN.ASM:6327 → 6684). */
     deactivate_current_option(g);
 }
 
