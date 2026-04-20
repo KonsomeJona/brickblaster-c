@@ -20,6 +20,13 @@ _nothing yet_
 _nothing yet_
 
 ### Fixed
+_nothing yet_
+
+---
+
+## [0.1.2] — 2026-04-20
+
+### Fixed
 - **Windows taskbar icon still showed TakoHi in 0.1.1**: the runtime
   `SetWindowIcon()` call in `main.c:655` was correctly switched to
   `assets/blaster_icon.png`, but `src/brickblaster.rc` (the Win32 resource
@@ -86,6 +93,7 @@ _nothing yet_
 ### Licence
 - GPL v3 — inherited from upstream david4599/BrickBlaster.
 
-[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/KonsomeJona/brickblaster-c/releases/tag/v0.1.0
