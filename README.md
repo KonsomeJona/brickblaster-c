@@ -178,8 +178,7 @@ as two repositories:
   binaries, WinEOS 4.00 Alpha, and the standalone EOS 3.05 / 3.06
   DOS extenders.
 
-**C/raylib port (2026):** [Jonathan Odul](https://github.com/konsomejona)
-([konsomejona](https://github.com/konsomejona)).
+**C/raylib port (2026):** [Jonathan Odul (konsomejona)](https://github.com/konsomejona).
 
 **Third-party:**
 - [raylib](https://www.raylib.com/) 5.0 (zlib license)
