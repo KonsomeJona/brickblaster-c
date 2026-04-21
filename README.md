@@ -9,14 +9,12 @@
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
-> ⚠️ **Preview / work in progress.** The ASM-level internals (gameplay
-> constants, level format, XOR codec, power-up tables, collision LUT)
-> are ported byte-for-byte and documented with ASM line citations, but
-> several UI / visual layers (menu layout, intro sequence, some power-up
-> animations, iron-ball behaviour against unbreakable bricks, etc.) still
-> deviate from the 1999 binary. See [Known gaps vs the 1999 original](#known-gaps-vs-the-1999-original)
-> below. Bug reports welcome — particularly from players who remember
-> the original.
+> **Status: early preview, actively iterating.** The ASM-level internals
+> (gameplay constants, level format, XOR codec, power-up tables,
+> collision LUT) are ported byte-for-byte with ASM line citations. The
+> UI polish pass (menu layout, intro timing, a few power-up animations)
+> is still in flight — see the [polish checklist](#polish-checklist-vs-the-1999-original)
+> for what's being worked on next.
 
 > **Based on the original x86 assembly sources** of BrickBlaster,
 > released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demomaker
@@ -69,48 +67,44 @@ current state of play:
 - Timing constants (`DELAI_OPTION`, `DELAI_DEMO`, bonus life threshold,
   etc.)
 
-**Still deviates from the 1999 original** (targeted for upcoming fixes —
-see [Known gaps](#known-gaps-vs-the-1999-original)):
-- Menu layout / visuals and some control paths
-- Intro sequence composition and framing
-- Some power-up sprite animations and collision-box sizing
-- Iron-ball behaviour against unbreakable bricks
-- In-game ESC → menu on desktop
-- Teleport power-up animation
+**In-flight polish pass** (see [checklist](#polish-checklist-vs-the-1999-original)):
+menu layout, intro timing, a few power-up animations, iron-ball /
+unbreakable-brick interaction, ESC-to-menu on desktop, teleport
+animation.
 
 Per-iteration audit trail with ASM line citations:
 [audit-findings.md](audit-findings.md) and
 [audit-asm-faithful.md](audit-asm-faithful.md).
 
-## Known gaps vs the 1999 original
+## Polish checklist vs the 1999 original
 
-Reported by upstream author **david4599** against `v0.1.4`, 2026-04-21.
-Each item is tracked and will be addressed in upcoming releases:
+Items on the next-iterations list, mostly UI and a few gameplay
+edges. Contributions and bug reports from people who know the 1999
+binary are genuinely useful — open an issue or a PR.
 
-- **Menu**: `Brick Blaster` logo not pinned at top; selection highlight
-  is a square instead of a rounded shape matching the logo; selection
-  text does not follow the mouse; sound settings screen missing; the
-  `MAIN MENU` header is cropped.
-- **Unbreakable bricks** flicker instead of rendering stable.
-- **Ball counter glitch**: the player is sometimes handed `3 balles`
-  mid-game with no powerup pickup to justify it.
-- **Power-ups**: collision hitboxes appear larger than the sprite;
-  paddle and power-up animations don't play through correctly;
-  **teleport** powerup is non-functional; **iron ball** stays red and
-  *bounces* off unbreakable bricks instead of **passing through** them
-  (the original even slows the tick when several iron balls are
-  traversing a wall of unbreakables).
-- **ESC / Escape** does not return to the menu from an in-progress
-  game on Windows desktop.
-- **Intro**: composition differs from the 1999 intro; `assets/title/media.png`
-  is present but not wired to the intro pipeline; the animated
-  "Brick Blaster" logo and the credits stills currently play at points
-  where the original does not.
-- **Android build**: `android/` has no `README.md` even though the main
-  README links to one. Either the doc or the link needs to be added.
-
-Contributions / further bug reports very welcome. Open an issue or
-a PR.
+- **Menu**: pin the `Brick Blaster` logo at the top; swap the square
+  selection highlight for a rounded shape matching the logo; make
+  selection text follow the mouse; wire up the sound settings screen;
+  fix the cropped `MAIN MENU` header.
+- **Unbreakable bricks**: currently flicker — render as a stable tile.
+- **Ball counter glitch**: players sometimes receive `3 balles`
+  mid-game with no powerup pickup — root-cause and fix.
+- **Power-ups**:
+  - Collision hitboxes look larger than the sprite — tighten to match.
+  - Paddle + power-up animations don't always play through — finish
+    the sequence wiring.
+  - **Teleport** currently no-ops — port the animation + destination
+    logic.
+  - **Iron ball** stays red and *bounces* off unbreakable bricks;
+    the original passes through them (and even slows the tick when
+    multiple iron balls traverse a wall of unbreakables).
+- **ESC** → menu from an in-progress game on Windows desktop.
+- **Intro**: align composition with the 1999 intro; wire
+  `assets/title/media.png` into the pipeline; move the animated
+  "Brick Blaster" logo and credits stills to the points where the
+  original shows them.
+- **Android doc**: add `android/README.md` (or drop the link from the
+  main README until it exists).
 
 ## Build
 
@@ -205,10 +199,13 @@ section 5, the following prominent modifications were made in 2026:
   - `TAKOHI_BRANDING` — publisher splash slide at end of intro.
   - `GIF_RECORDER` — F12 in-game GIF capture for demo recording.
 
-No gameplay constant, scoring rule, collision behaviour, power-up
-effect, level layout, or string has been altered beyond what the ASM
-source contains. All 24 power-ups match `struc_options` byte-for-byte.
-Remaining deliberate deviations are listed in `audit-findings.md`.
+No gameplay constant, scoring rule, power-up table, level layout, or
+string is intentionally altered — the 24 power-ups match `struc_options`
+byte-for-byte and the 80 levels load unchanged from `.lv0` / `.lv1` /
+`.lv2`. A few visible behaviours still diverge while the polish pass
+is in progress (see [checklist](#polish-checklist-vs-the-1999-original));
+deliberate deviations are tracked in
+[audit-findings.md](audit-findings.md).
 
 ## Credits
 
