@@ -23,6 +23,8 @@ void paddle_init(Paddle *p)
     p->size     = PADDLE_SIZE_NORMAL;
     p->w        = PADDLE_W;          /* Blaster.inc:227  vaisseau_size_x = 74  */
     p->h        = PADDLE_H;          /* Blaster.inc:228  vaisseau_size_y = 25  */
+    p->min_x    = PLAY_X1;           /* MAIN.ASM:1454  sprite_min_x = bord_x  */
+    p->max_x    = PLAY_X2 - p->w;   /* MAIN.ASM:1456-1458  limite_x - sprite_size_x */
 
     /* Centre horizontally within play area — MAIN.ASM:1735 */
     p->x = SCREEN_CENTER - PADDLE_W / 2; /* 320 - 37 = 283 */
@@ -65,6 +67,11 @@ void paddle_set_size(Paddle *p, PaddleSize size)
             p->h = PADDLE_H;       /* Blaster.inc:228  vaisseau_size_y = 25 */
             break;
     }
+    /* MAIN.ASM:2014-2018 / 2223-2227 — size-change handlers reset the sprite
+     * min_x / max_x to normal play-area bounds.  When COLLISION is active,
+     * detect_collision_cursor will override these on the next frame. */
+    p->min_x = PLAY_X1;
+    p->max_x = PLAY_X2 - p->w;
 }
 
 /* --------------------------------------------------------------------------
@@ -83,13 +90,11 @@ void paddle_set_size(Paddle *p, PaddleSize size)
  * -------------------------------------------------------------------------- */
 void paddle_clamp(Paddle *p)
 {
-    int min_x, max_x;
-
-    min_x = PLAY_X1;           /* Blaster.inc:445  bord_x = 112 */
-    max_x = PLAY_X2 - p->w;   /* Blaster.inc:447  limite_x = 528, minus paddle width */
-
-    if (p->x < min_x) p->x = min_x; /* MOUSE.ASM:62  mov cursor_2.sprite_pos_x,min_x */
-    if (p->x > max_x) p->x = max_x; /* MOUSE.ASM:66  mov cursor_2.sprite_pos_x,max_x */
+    /* MOUSE.ASM:55-68 — Refresh_Keyboard reads cursor.sprite_min_x / max_x
+     * (per-paddle, updated by Init_Cursor / size-change handlers /
+     * detect_collision_cursor in duel). */
+    if (p->x < p->min_x) p->x = p->min_x; /* MOUSE.ASM:62 */
+    if (p->x > p->max_x) p->x = p->max_x; /* MOUSE.ASM:66 */
 }
 
 /* --------------------------------------------------------------------------

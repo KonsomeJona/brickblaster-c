@@ -219,6 +219,12 @@ typedef struct {
     int          current_option_count; /* countdown timer for active timed powerup (DELAI_OPTION=600) */
     PowerupType  current_option;       /* active timed powerup type, or POWERUP_COUNT if none */
 
+    /* POWERUP_COLLISION (duel / coop) — MAIN.ASM:6830-6836 option_collision_p
+     * stores (cursor_2.x - cursor_1.x) at pickup time.  detect_collision_cursor
+     * (MAIN.ASM:2274-2316) branches on the sign every frame to decide which
+     * paddle clamps which. */
+    int          collision_flag;
+
     /* -------------------------------------------------------------------
      * Demo mode  (MAIN.ASM:1159-1168, Blaster.inc:420  DELAI_DEMO=800)
      * ------------------------------------------------------------------- */

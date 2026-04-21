@@ -307,7 +307,6 @@ int powerup_duration(PowerupType type)
         case POWERUP_BONUS:       /* MAIN.ASM:6802  option_bonus_p:     instant score */
         case POWERUP_MALUS:       /* MAIN.ASM:6816  option_malus_p:     instant score */
         case POWERUP_NEXT_LEVEL:  /* MAIN.ASM:6726  option_next_level_p: instant level advance */
-        case POWERUP_COLLISION:   /* MAIN.ASM:6830  option_collision_p: instant 2P effect */
         case POWERUP_GHOST:       /* MAIN.ASM:6788  mov current_option,Off — ghost is instant;
                                    * ghost balls self-destruct on contact, no timed state needed */
             return 0;
@@ -336,6 +335,12 @@ int powerup_duration(PowerupType type)
         case POWERUP_REVERSE:     /* MAIN.ASM:6562  option_reverse_p    */
         case POWERUP_MAGNETIC:    /* MAIN.ASM:6742  option_magnetic_p   */
         case POWERUP_MINI_SHOOT:  /* MAIN.ASM:6554  option_mini_shoot_p */
+        case POWERUP_COLLISION:   /* MAIN.ASM:6830  option_collision_p — pickup
+                                   * only snapshots collision_flag; the clamp
+                                   * effect runs every frame via
+                                   * detect_collision_cursor while
+                                   * current_option == collision_o, expiring
+                                   * when current_option_count hits 0. */
             return DELAI_OPTION;  /* 600 frames — Blaster.inc:417 */
 
         default:

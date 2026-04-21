@@ -31,6 +31,7 @@ static void compute_launch_velocity(Difficulty diff, int level_num, int *out_vx,
 static void deactivate_current_option(Game *g);
 static void inc_score(Game *g, int owner, int ecx);
 static void dec_score(Game *g, int owner, int ecx);
+static void detect_collision_cursor(Game *g);
 
 /* P1-ASM-34: Time_Between_Option per-difficulty spacing, read from cfg if
  * set by game_set_powerup_spacing(), falling back to DELAI_BETWEEN_OPTION.
@@ -655,6 +656,13 @@ static void deactivate_current_option(Game *g) {
             if (g->balls[i].is_ghost) g->balls[i].active = 0;
         }
         break;
+    case POWERUP_COLLISION:
+        /* collision_flag is only consulted while current_option ==
+         * POWERUP_COLLISION, but reset for hygiene.  Paddle bounds are
+         * restored automatically next frame by detect_collision_cursor's
+         * @@ok branch (MAIN.ASM:2296-2305). */
+        g->collision_flag = 0;
+        break;
     /* POWERUP_SHOOT / MINI_SHOOT / SMALL_SHIP / LARGE_SHIP / REVERSE are NOT
      * tracked via current_option — they are per-paddle (Paddle.laser_timer /
      * size_timer / reverse_timer) and ticked down independently in
@@ -1040,14 +1048,21 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         g->monster_spawn_counter = 0;  /* reset so timer doesn't double-spawn */
         break;
 
-    /* COLLISION: 2P-only effect — locks cursors so they bounce off each other.
+    /* COLLISION: 2P effect (coop + duel) — locks the two cursors so they
+     * push each other instead of overlapping.
      * MAIN.ASM:6830-6836 option_collision_p stores (cursor_2.x - cursor_1.x)
-     * into collision_flag. MAIN.ASM:2275-2316 detect_collision_cursor constrains
-     * cursor_1.max_x = cursor_2.x - size_x (and inverse).
-     * Iter 2 fix #4: PUNTED to iter 3 — requires reworking paddle clamp in
-     * input_frame.c / paddle.c to consult a dual-clamp mode. Effect is
-     * duel-only so solo play is unaffected. TODO: implement full behaviour. */
+     * into collision_flag.  The sign picks which paddle clamps which in
+     * detect_collision_cursor (MAIN.ASM:2274-2316, ticked each frame).
+     * current_option + current_option_count are set by the shared pipeline
+     * below (mirroring MAIN.ASM:5687-5691 detect_prise_option), so the
+     * clamp effect auto-expires after DELAI_OPTION frames. */
     case POWERUP_COLLISION:
+        if (g->game_mode > 0) {
+            g->collision_flag = g->paddle_2.x - g->paddle.x;
+        }
+        g->current_option = type;
+        g->current_option_count = (duration > 0) ? duration : DELAI_OPTION;
+        break;
     default:
         break;
     }
@@ -1487,6 +1502,47 @@ static PowerupType dev_next_powerup(Game *g) {
 }
 
 /* --------------------------------------------------------------------------
+ * detect_collision_cursor  — MAIN.ASM:2274-2316
+ *
+ * 1P solo: no-op (paddles never collide).
+ * 2P (coop or duel):
+ *   - POWERUP_COLLISION active: update paddle clamps so the cursors push
+ *     each other, using the sign of collision_flag (set at pickup) to decide
+ *     which paddle is on which side.
+ *   - Otherwise: restore both paddles' min_x / max_x to the normal play-area
+ *     bounds (the @@ok branch MAIN.ASM:2296-2305).
+ *
+ * Called each frame from game_update before the paddle input step so
+ * paddle_clamp (invoked from paddle_move) reads the up-to-date bounds.
+ * -------------------------------------------------------------------------- */
+static void detect_collision_cursor(Game *g) {
+    Paddle *p1 = &g->paddle;
+    Paddle *p2 = &g->paddle_2;
+
+    if (g->game_mode == 0) return;             /* MAIN.ASM:2277 cmp nbs_player,2 */
+
+    if (g->current_option != POWERUP_COLLISION) {
+        /* @@ok: MAIN.ASM:2296-2305 — reset to normal play-area bounds. */
+        p1->min_x = PLAY_X1;
+        p2->min_x = PLAY_X1;
+        p1->max_x = PLAY_X2 - p1->w;
+        p2->max_x = PLAY_X2 - p2->w;
+        return;
+    }
+
+    if (g->collision_flag >= 0) {
+        /* P2 on right of P1 (MAIN.ASM:2285-2292) — P2's left edge clamps
+         * to P1's right edge; P1's right edge clamps to P2's left edge. */
+        p2->min_x = p1->x + p1->w;
+        p1->max_x = p2->x - p1->w;
+    } else {
+        /* P2 on left of P1 — @@inverse MAIN.ASM:2308-2315. */
+        p1->min_x = p2->x + p2->w;
+        p2->max_x = p1->x - p2->w;
+    }
+}
+
+/* --------------------------------------------------------------------------
  * game_update
  *
  * Per-frame game logic.  Must be called once per frame at 60 Hz.
@@ -1550,6 +1606,11 @@ void game_update(Game *g, const FrameInput *input) {
      * ======================================================================= */
     g->paddle.prev_x   = g->paddle.x;    /* save for magnetic ball tracking */
     g->paddle_2.prev_x = g->paddle_2.x;  /* same for P2 in MP modes */
+
+    /* MAIN.ASM:1079  call detect_collision_cursor — runs before refresh_mouse
+     * so paddle_clamp reads up-to-date min_x / max_x bounds. */
+    detect_collision_cursor(g);
+
     dx = 0;
     /* MAIN.ASM:1154-1155  cmp B[ebp+key_p],On → pause (not handled here) */
 

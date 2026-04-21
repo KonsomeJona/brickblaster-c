@@ -46,6 +46,13 @@ typedef enum {
 typedef struct {
     int x, y;          /* pixel position top-left of paddle sprite       */
     int w, h;          /* current width and height                       */
+    int min_x, max_x;   /* Horizontal movement clamp (MAIN.ASM sprite_min_x
+                         * / sprite_max_x). Normally PLAY_X1 / PLAY_X2 - w
+                         * (Init_Cursor MAIN.ASM:1454-1458, size-change
+                         * handlers MAIN.ASM:2014-2018 / 2223-2227).
+                         * In 2P with POWERUP_COLLISION active, updated every
+                         * frame by game_update's detect_collision_cursor
+                         * (MAIN.ASM:2274-2316). */
     PaddleSize size;    /* NORMAL / SMALL / LARGE                         */
     int reversed;       /* direction reversed powerup (Option_reverse)    */
     int has_gun;        /* shoot powerup active (mirrors laser_timer > 0) */
