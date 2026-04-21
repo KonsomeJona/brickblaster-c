@@ -82,29 +82,46 @@ Items on the next-iterations list, mostly UI and a few gameplay
 edges. Contributions and bug reports from people who know the 1999
 binary are genuinely useful — open an issue or a PR.
 
+**Done (shipped in post-v0.1.4 commits):**
+- ✅ **Iron ball**: passes through indestructible bricks and renders
+  blue while active — matches `MAIN.ASM:2844-2849` + `3862-3864`
+  (`sprite_rebond = Off` disables the bounce, sprite swap is per-frame
+  in the ball loop). Dual-mode colour swap mirrored.
+- ✅ **Teleport power-up**: teleports each ball to a random free
+  position inside the play area (skips incassable tiles), mirroring
+  `MAIN.ASM:1526-1563 Teleporte_Ball`. Same routine is now used by
+  the `BRICK_TELEPORTER` hit path (was also wrong).
+- ✅ **Power-up hitbox**: 26×24 (was inflated to 52×48 — leftover from
+  the Wear OS 2x draw path). ASM-exact containment check.
+- ✅ **Unbreakable bricks flicker**: removed the ambient frame-toggle
+  that pulsed every incassable brick in sync. Hit-triggered reflet
+  animation per-brick still on the list for later.
+- ✅ **ESC binding**: ESC toggles pause from gameplay and exits to the
+  main menu from the pause screen (desktop UX; `P` / click / gamepad
+  still resume as before).
+- ✅ **Startup intro**: plays only `media.png` (Media Pocket splash,
+  `MAIN.ASM:54 File_Editor = Media.gif`) + `credit_b.png`. The
+  animated `intro.flc` logo and the remaining credit letters are part
+  of the **Credits** menu (`MAIN.ASM:146-190 @@credit`), not launch.
+- ✅ **Android doc**: `android/README.md` added (honest scaffold
+  status).
+
+**Still on the list:**
 - **Menu**: pin the `Brick Blaster` logo at the top; swap the square
   selection highlight for a rounded shape matching the logo; make
   selection text follow the mouse; wire up the sound settings screen;
   fix the cropped `MAIN MENU` header.
-- **Unbreakable bricks**: currently flicker — render as a stable tile.
 - **Ball counter glitch**: players sometimes receive `3 balles`
-  mid-game with no powerup pickup — root-cause and fix.
-- **Power-ups**:
-  - Collision hitboxes look larger than the sprite — tighten to match.
-  - Paddle + power-up animations don't always play through — finish
-    the sequence wiring.
-  - **Teleport** currently no-ops — port the animation + destination
-    logic.
-  - **Iron ball** stays red and *bounces* off unbreakable bricks;
-    the original passes through them (and even slows the tick when
-    multiple iron balls traverse a wall of unbreakables).
-- **ESC** → menu from an in-progress game on Windows desktop.
-- **Intro**: align composition with the 1999 intro; wire
-  `assets/title/media.png` into the pipeline; move the animated
-  "Brick Blaster" logo and credits stills to the points where the
-  original shows them.
-- **Android doc**: add `android/README.md` (or drop the link from the
-  main README until it exists).
+  mid-game with no powerup pickup — root-cause and fix (needs repro).
+- **Power-up animations**: paddle explosion / telepod / shoot
+  sequence wiring (`sprite_nbs_shape` animation system not yet
+  ported for paddle & powerups — only monsters animate today).
+- **Unbreakable brick reflet animation**: per-brick hit-triggered
+  ripple (`MAIN.ASM:4058-4061 + 6220-6240`), replacing the removed
+  ambient flicker.
+- **Credits menu**: prepend the `intro.flc` 36-frame animation before
+  the remaining credit letters (M / G / C / W / E), matching the
+  `@@credit` loop.
 
 ## Build
 
