@@ -1,34 +1,31 @@
 #pragma once
-/* screen_intro_original.h — Original BrickBlaster intro sequence.
+/* screen_intro_original.h — Startup intro sequence (MAIN.ASM:50-57).
  *
- * Plays the 36-frame intro.flc animation followed by the 6 credit GIFs
- * (b, m, g, c, w, e), each with a fade-in/hold/fade-out. Exactly matches
- * MAIN.ASM:53-190 display_intro / FILE.ASM:54-114 load_intro_anim.
+ * Plays two slides before dropping into the main menu:
+ *   1. Media Pocket publisher splash — MAIN.ASM:54  File_Editor = Media.gif
+ *      (shipped as assets/title/media.png).
+ *   2. credit_b.png — MAIN.ASM:56  File_Credit_B (first credit letter).
+ *
+ * The animated `intro.flc` logo and the remaining credit letters
+ * (m/g/c/w/e) are part of the Credits menu (MAIN.ASM:146-190 @@credit),
+ * handled by screen_credits.c — they do NOT play at startup.
  */
 
 #include "screen_manager.h"
 #include "input_frame.h"
 #include <raylib.h>
 
-#define INTRO_ORIG_FRAME_COUNT      36
-#define INTRO_ORIG_TICKS_PER_FRAME   5   /* FILE.ASM:103 : ~5 ticks / frame */
-#define INTRO_ORIG_CREDIT_COUNT      6   /* credit_b, m, g, c, w, e */
 #define INTRO_ORIG_CREDIT_FADE      20   /* fade-in/out frames */
 #define INTRO_ORIG_CREDIT_HOLD     120   /* hold ~2 s at 60 Hz */
 
 typedef struct {
-    Texture2D frames[INTRO_ORIG_FRAME_COUNT];
-    int       frame_count;
+    Texture2D media_splash;    /* assets/title/media.png — Media Pocket publisher splash */
+    Texture2D credit_b;        /* assets/credits/credit_b.png — first credit letter */
+    Texture2D takohi_logo;     /* TakoHi logo shown as final slide (compile-time opt) */
 
-    Texture2D credits[INTRO_ORIG_CREDIT_COUNT];
-    int       credit_count;
-
-    Texture2D takohi_logo;     /* TakoHi logo shown as final slide before menu */
-
-    int       phase;           /* 0=FLI anim, 1=credits, 2=TakoHi slide, 3=done */
-    int       current_index;   /* frame index (phase 0) or credit index (phase 1) */
+    int       phase;           /* 0=media, 1=credit_b, 2=TakoHi, 3=done */
     int       timer;           /* per-sub-step tick counter */
-    float     alpha;           /* fade-in/out alpha for the credit currently shown */
+    float     alpha;           /* fade-in/out alpha for current slide */
 
     int       loaded;
 } IntroOriginalAssets;

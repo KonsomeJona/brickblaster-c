@@ -1,9 +1,19 @@
-/* screen_intro_original.c — 36-frame intro.flc animation + 6 credit GIFs
- * + TakoHi publisher slide with URL.
+/* screen_intro_original.c — Startup intro sequence (MAIN.ASM:50-57).
  *
- * MAIN.ASM:53-190 display_intro — the sequence that runs before the menu.
- * FILE.ASM:54-114 load_intro_anim — FLI player: ~5 ticks/frame, fade-in,
- * loop until fli_last_frame.
+ *   display_intro_2 File_Editor      → Media.gif (publisher splash)
+ *   display_intro   File_Credit_B    → credit_b.gif (first credit letter)
+ *
+ * The animated `intro.flc` logo and credit_m/g/c/w/e letters are part of
+ * the Credits menu (MAIN.ASM:146-190 @@credit, implemented in
+ * screen_credits.c) and do NOT play at startup.
+ *
+ * The optional TakoHi publisher slide is appended under -DTAKOHI_BRANDING.
+ * It has no ASM counterpart — it's our own porter credit, gated so
+ * vanilla builds match 1999 exactly.
+ *
+ * David feedback (2026-04-21): the previous implementation looped the
+ * FLC frames + all six credits at startup; the FLC logo and the extra
+ * credits now stay in the Credits menu where the ASM puts them.
  */
 
 #include "screen_intro_original.h"
@@ -11,42 +21,16 @@
 #include "constants.h"
 #include "input_gamepad.h"
 #include <raylib.h>
-#include <stdio.h>
-
-/* Credit GIF file names in the original display order
- * (MAIN.ASM:57, 153, 162, 171, 180, 189). */
-static const char *s_credit_files[INTRO_ORIG_CREDIT_COUNT] = {
-    ASSETS_BASE "credits/credit_b.png",
-    ASSETS_BASE "credits/credit_m.png",
-    ASSETS_BASE "credits/credit_g.png",
-    ASSETS_BASE "credits/credit_c.png",
-    ASSETS_BASE "credits/credit_w.png",
-    ASSETS_BASE "credits/credit_e.png",
-};
 
 void intro_original_assets_load(IntroOriginalAssets *a) {
     if (!a || a->loaded) return;
 
-    a->frame_count = 0;
-    for (int i = 0; i < INTRO_ORIG_FRAME_COUNT; i++) {
-        char path[128];
-        snprintf(path, sizeof(path),
-                 ASSETS_BASE "intro/frame_%04d.png", i + 1);
-        Texture2D t = LoadTexture(path);
-        if (t.id == 0) break;
-        a->frames[a->frame_count++] = t;
-    }
-
-    a->credit_count = 0;
-    for (int i = 0; i < INTRO_ORIG_CREDIT_COUNT; i++) {
-        Texture2D t = LoadTexture(s_credit_files[i]);
-        if (t.id == 0) continue;
-        a->credits[a->credit_count++] = t;
-    }
+    a->media_splash = LoadTexture(ASSETS_BASE "title/media.png");
+    a->credit_b     = LoadTexture(ASSETS_BASE "credits/credit_b.png");
 
 #if defined(TAKOHI_BRANDING)
-    /* TakoHi publisher logo (shown as final slide before menu).
-     * Disabled when -DTAKOHI_BRANDING=0 for vanilla builds. */
+    /* TakoHi publisher logo (final slide before menu, porter credit).
+     * Disabled when -DTAKOHI_BRANDING=0 for a strict 1999-parity build. */
     a->takohi_logo = assets_load_takohi_logo();
 #else
     a->takohi_logo = (Texture2D){0};
@@ -58,25 +42,46 @@ void intro_original_assets_load(IntroOriginalAssets *a) {
 
 void intro_original_assets_unload(IntroOriginalAssets *a) {
     if (!a || !a->loaded) return;
-    for (int i = 0; i < a->frame_count;  i++) UnloadTexture(a->frames[i]);
-    for (int i = 0; i < a->credit_count; i++) UnloadTexture(a->credits[i]);
-    if (a->takohi_logo.id != 0) UnloadTexture(a->takohi_logo);
-    a->frame_count  = 0;
-    a->credit_count = 0;
-    a->loaded       = 0;
+    if (a->media_splash.id != 0) UnloadTexture(a->media_splash);
+    if (a->credit_b.id     != 0) UnloadTexture(a->credit_b);
+    if (a->takohi_logo.id  != 0) UnloadTexture(a->takohi_logo);
+    a->loaded = 0;
 }
 
 void intro_original_reset(IntroOriginalAssets *a) {
     if (!a) return;
-    a->phase         = 0;
-    a->current_index = 0;
-    a->timer         = 0;
-    a->alpha         = 0.0f;
+    a->phase = 0;
+    a->timer = 0;
+    a->alpha = 0.0f;
 }
 
 static void goto_menu(ScreenState *state) {
     state->current_menu = 1;
     state->game_mode    = STATE_MENU;
+}
+
+/* Advance the fade-in/hold/fade-out timer for the current slide.
+ * Returns 1 when the slide is finished, 0 while it is playing (with
+ * `*out_alpha` set for the draw pass). */
+static int update_fade_slide(int timer, float *out_alpha) {
+    int fade  = INTRO_ORIG_CREDIT_FADE;
+    int hold  = INTRO_ORIG_CREDIT_HOLD;
+    int total = fade + hold + fade;
+
+    if (timer < fade) {
+        *out_alpha = (float)timer / (float)fade;
+        return 0;
+    }
+    if (timer < fade + hold) {
+        *out_alpha = 1.0f;
+        return 0;
+    }
+    if (timer < total) {
+        *out_alpha = 1.0f - (float)(timer - fade - hold) / (float)fade;
+        return 0;
+    }
+    *out_alpha = 0.0f;
+    return 1;
 }
 
 void intro_original_update(ScreenState *state, IntroOriginalAssets *a,
@@ -85,80 +90,52 @@ void intro_original_update(ScreenState *state, IntroOriginalAssets *a,
 
     a->timer++;
 
-    /* Skip everything on input after a short grace period. */
+    /* Skip the whole intro on any input after a short grace period. */
     if (a->timer > 10) {
         int skip = (GetKeyPressed() != 0) || input->click_pressed ||
                    gamepad_confirm() || gamepad_start() || gamepad_back();
         if (skip) { intro_original_reset(a); goto_menu(state); return; }
     }
 
-    /* Phase 0 — FLI animation: advance one frame every N ticks. */
+    /* Phase 0 — Media Pocket publisher splash (MAIN.ASM:54 File_Editor). */
     if (a->phase == 0) {
-        if (a->frame_count == 0) { a->phase = 1; a->timer = 0; return; }
-
-        int step = a->timer / INTRO_ORIG_TICKS_PER_FRAME;
-        if (step >= a->frame_count) {
-            a->phase         = 1;
-            a->current_index = 0;
-            a->timer         = 0;
-            a->alpha         = 0.0f;
+        if (a->media_splash.id == 0) {
+            /* No asset → skip straight to credit_b */
+            a->phase = 1;
+            a->timer = 0;
             return;
         }
-        a->current_index = step;
+        if (update_fade_slide(a->timer, &a->alpha)) {
+            a->phase = 1;
+            a->timer = 0;
+            a->alpha = 0.0f;
+        }
         return;
     }
 
-    /* Phase 1 — credit GIFs: fade-in -> hold -> fade-out, then next. */
+    /* Phase 1 — first credit letter (MAIN.ASM:56 File_Credit_B). */
     if (a->phase == 1) {
-        if (a->credit_count == 0 || a->current_index >= a->credit_count) {
+        if (a->credit_b.id == 0) {
+            a->phase = 2;
+            a->timer = 0;
+            return;
+        }
+        if (update_fade_slide(a->timer, &a->alpha)) {
             a->phase = 2;
             a->timer = 0;
             a->alpha = 0.0f;
-            return;
-        }
-
-        int fade  = INTRO_ORIG_CREDIT_FADE;
-        int hold  = INTRO_ORIG_CREDIT_HOLD;
-        int total = fade + hold + fade;
-
-        if (a->timer < fade) {
-            a->alpha = (float)a->timer / (float)fade;
-        } else if (a->timer < fade + hold) {
-            a->alpha = 1.0f;
-        } else if (a->timer < total) {
-            a->alpha = 1.0f - (float)(a->timer - fade - hold) / (float)fade;
-        } else {
-            a->current_index++;
-            a->timer = 0;
-            a->alpha = 0.0f;
-            if (a->current_index >= a->credit_count) {
-                a->phase = 2;
-                a->timer = 0;
-                a->alpha = 0.0f;
-            }
         }
         return;
     }
 
-    /* Phase 2 — TakoHi logo + URL: same fade timing as credit GIFs. */
+    /* Phase 2 — TakoHi logo + URL (compile-time opt, porter credit). */
     if (a->phase == 2) {
         if (a->takohi_logo.id == 0) {
             a->phase = 3;
             goto_menu(state);
             return;
         }
-
-        int fade  = INTRO_ORIG_CREDIT_FADE;
-        int hold  = INTRO_ORIG_CREDIT_HOLD;
-        int total = fade + hold + fade;
-
-        if (a->timer < fade) {
-            a->alpha = (float)a->timer / (float)fade;
-        } else if (a->timer < fade + hold) {
-            a->alpha = 1.0f;
-        } else if (a->timer < total) {
-            a->alpha = 1.0f - (float)(a->timer - fade - hold) / (float)fade;
-        } else {
+        if (update_fade_slide(a->timer, &a->alpha)) {
             a->phase = 3;
             goto_menu(state);
         }
@@ -186,17 +163,14 @@ void intro_original_draw(IntroOriginalAssets *a) {
 
     ClearBackground((Color){0, 0, 0, 255});
 
+    unsigned char al = (unsigned char)(a->alpha * 255.0f);
+
     if (a->phase == 0) {
-        if (a->current_index >= 0 && a->current_index < a->frame_count)
-            draw_centered(a->frames[a->current_index], 255);
+        draw_centered(a->media_splash, al);
     } else if (a->phase == 1) {
-        if (a->current_index >= 0 && a->current_index < a->credit_count) {
-            unsigned char al = (unsigned char)(a->alpha * 255.0f);
-            draw_centered(a->credits[a->current_index], al);
-        }
+        draw_centered(a->credit_b, al);
     } else if (a->phase == 2) {
         /* TakoHi logo centred, scaled to 50% canvas width, + URL below */
-        unsigned char al = (unsigned char)(a->alpha * 255.0f);
         if (a->takohi_logo.id != 0) {
             float max_w = SCREEN_W * 0.5f;
             float sc = (a->takohi_logo.width > max_w)
