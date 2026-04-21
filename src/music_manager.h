@@ -11,7 +11,7 @@
 typedef enum {
     MUSIC_BLASTER = 0,    // blaster.mod - intro/menu
     MUSIC_THELAST,        // thelast.mod - world 0 (space)
-    MUSIC_LODE,           // lode.mod - world 1 (eclipse)
+    MUSIC_LODE,           // lode.mod - world 1 (arcade)
     MUSIC_CREDIT,         // credit.mod - credits
     MUSIC_RAIN,           // rain.mod - high scores
     MUSIC_COUNT

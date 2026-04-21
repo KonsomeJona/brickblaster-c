@@ -24,7 +24,7 @@ typedef enum {
     /* Settings descriptions */
     STR_DESC_PAD_SPEED, STR_DESC_DRAG, STR_DESC_TILT, STR_DESC_TILT_SPEED,
     /* World / Difficulty */
-    STR_SELECT_WORLD, STR_SPACE, STR_ECLIPSE,
+    STR_SELECT_WORLD,
     STR_SELECT_DIFFICULTY, STR_EASY, STR_NORMAL, STR_HARD,
     /* Game overlays */
     STR_READY, STR_GAME_PAUSED, STR_GAME_OVER, STR_DEMO_LABEL,

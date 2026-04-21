@@ -90,7 +90,7 @@ _nothing yet_
 
 ### Added
 - Initial public release.
-- Full C99 port of **BrickBlaster** (Media Pocket, 1999, Eclipse demoscene
+- Full C99 port of **BrickBlaster** (Media Pocket, 1999, Eclipse demomaker
   team) using raylib 5.0 for rendering / audio / input / windowing.
 - Windows x64 (MSVC), Linux x64 (GCC/Clang), macOS arm64, Android (NDK)
   supported.

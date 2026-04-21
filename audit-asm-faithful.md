@@ -214,10 +214,14 @@
 - **Site**: `src/hiscore.c:45-53`
 - **Fix**: Add `_Static_assert(offsetof(HiscoreEntry, score_text) == 4)` etc.
 
-## P1-14 — Menu 4 "arcade" should be "eclipse"
-- **Site**: `src/screen_menu.c:66`, `i18n.c:78-79`
-- **ASM**: Blaster.cfg menu_text_menu4_b
-- **Fix**: Add lowercase `STR_M_ECLIPSE = "eclipse"` to i18n; swap STR_M_ARCADE.
+## P1-14 — Menu 4 second world label (resolved)
+- **Site**: `src/screen_menu.c:66`, `i18n.c`
+- **ASM**: `Blaster.cfg` / `Blaster_en.cfg` / `Blaster_es.cfg` all use
+  `menu_text_4b ("arcade")` — the second world is "arcade", NOT "eclipse"
+  (Eclipse is the *demomaker team* name, not a world name).
+- **Status**: fixed — code uses `STR_M_ARCADE`. Dead `STR_SPACE` /
+  `STR_ECLIPSE` enum entries and their 6-language translations were
+  removed.
 
 ## P1-15 — World 2 exists (Blaster.lv2 31200 bytes) but unreachable from menu
 - **Site**: `src/screen_menu.c:166-172` world menu only exposes 0, 1

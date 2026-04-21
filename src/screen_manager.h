@@ -40,7 +40,7 @@ typedef struct {
     int current_menu;          // 1-7
     int demo_flag;             // 0=off, 1=on
     int demo_counter;          // Counts to 800
-    int world;                 // 0=space, 1=eclipse
+    int world;                 // 0=space, 1=arcade
     int nbs_player;            // 1 or 2
     int dual_flag;             // 0=coop, 1=vs
     int control_p2;            // 0=computer, 1=keyboard, 2=joystick (menu 3)

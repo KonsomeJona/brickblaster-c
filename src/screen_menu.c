@@ -174,7 +174,7 @@ static void menu_apply_action(ScreenState *state, int menu, int btn) {
         case 4: /* select world */
             switch (btn) {
                 case 0: state->world = 0; state->current_menu = 5; break;       /* space */
-                case 1: state->world = 1; state->current_menu = 5; break;       /* arcade/eclipse */
+                case 1: state->world = 1; state->current_menu = 5; break;       /* arcade */
                 case 2: break;                                                  /* blank */
                 case 3: state->current_menu = (state->nbs_player > 1) ? 3 : 2; break; /* cancel */
             }

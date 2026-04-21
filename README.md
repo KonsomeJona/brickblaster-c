@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
 > **Based on the original x86 assembly sources** of BrickBlaster,
-> released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demoscene
+> released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demomaker
 > team and open-sourced under GPL v3 in 2024.
 > Upstream repo: **[david4599/BrickBlaster](https://github.com/david4599/BrickBlaster)** — contains the original
 > `MAIN.ASM`, `HISCORE.ASM`, `FONTE.ASM`, `EDITOR.ASM`, `FILE.ASM`,
@@ -17,8 +17,9 @@
 > and the Watcom/DirectX toolchain to rebuild the 1999 binary.
 >
 > Companion archive: **[david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)** —
-> unmodified 1999 binaries and the **WinEOS** runtime (the Eclipse demoscene
-> team's DirectX wrapper that originally hosted BrickBlaster).
+> unmodified 1999 binaries and the **WinEOS** runtime (the Windows/DirectX
+> port of EOS — *Eclipse Operating System*, the custom DOS extender the
+> Eclipse demomaker team originally built to host BrickBlaster).
 >
 > This repo is a **C/raylib translation** of those sources, byte-exact
 > for all gameplay constants and file formats. Every non-trivial
@@ -36,7 +37,8 @@ A polished Arkanoid-style brick breaker with:
 - **2-player** coop and versus (duel) modes
 - **Level editor** to design your own levels
 - **Demo / attract mode** with AI paddle
-- Localized in English, French, Spanish (with partial German, Italian, Portuguese)
+- UI localized in English, French, German, Spanish, Italian, Portuguese
+  (in-game power-up labels stay in the original game config — FR / EN / ES)
 
 ## Fidelity goal
 
@@ -151,7 +153,7 @@ Remaining deliberate deviations are listed in `audit-findings.md`.
 
 ## Credits
 
-**Original 1999 game (Eclipse demoscene team):**
+**Original 1999 game (Eclipse demomaker team):**
 - **Marc Radermacher** ("Hacker Croll") — code (BrickBlaster + WinEOS)
 - **Christophe Résigné** ("Rez") — music
 - **Frédéric Box** ("Profil") — graphics
@@ -161,10 +163,10 @@ Published by [Media Pocket](https://www.abandonware-france.org/compagnies/media-
 via [Carapace (Softplace)](https://www.abandonware-france.org/compagnies/carapace-82/).
 
 **Source preservation & upstream archive (2024):**
-[david4599](https://github.com/david4599) — built the
-modern Watcom/DirectX toolchain, documented the patch notes, and
-convinced Marc Radermacher to open-source the assembly. Also curator
-of [BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
+[david4599](https://github.com/david4599) — packaged the Watcom 11.0B +
+DirectX 6 SDK build process (`build.bat`), documented the patches
+required to run the 1999 binary on modern Windows, and curates
+[BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
 (unmodified 1999 binaries + WinEOS runtime).
 
 **C/raylib port (2026):** [Jonathan Odul](https://github.com/konsomejona)
@@ -203,4 +205,4 @@ binary artefact, and GitHub release notes are generated from it.
 - Unmodified original + EOS archive: [david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
 - French commercial release (1999): [archive.org](https://archive.org/details/brick-blaster-1999)
 - Spanish commercial release: [archive.org](https://archive.org/details/brick-blaster-1999-spanish)
-- Eclipse demoscene team: [eclipse-game.com](https://www.eclipse-game.com)
+- Eclipse demomaker team: [eclipse-game.com](https://www.eclipse-game.com)
