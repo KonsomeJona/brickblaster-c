@@ -32,6 +32,7 @@ static void deactivate_current_option(Game *g);
 static void inc_score(Game *g, int owner, int ecx);
 static void dec_score(Game *g, int owner, int ecx);
 static void detect_collision_cursor(Game *g);
+static void teleport_ball_random(Game *g, Ball *b);
 
 /* P1-ASM-34: Time_Between_Option per-difficulty spacing, read from cfg if
  * set by game_set_powerup_spacing(), falling back to DELAI_BETWEEN_OPTION.
@@ -1000,35 +1001,32 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         break;
 
     /* ------------------------------------------------------------------
-     * TELEPOD: instantly teleport all active balls to a random active
-     * teleporter brick. P1-ASM-13: ONE-SHOT per ASM.
-     * MAIN.ASM:6634-6637 option_telepod_p: ret (no-op).
-     * MAIN.ASM:2873-2898 Refresh_Ball: if current_option==option_telepod_o
-     *   teleports each ball once, then @@reset_current_option clears it.
-     * The effective behaviour is: teleport all balls on collection, then
-     * immediately clear current_option — no ongoing 600-frame window.
+     * TELEPOD: each active ball is jumped to a random free position in
+     * the play area — NOT to a teleporter brick.  Previously we looked
+     * for BRICK_TELEPORTER cells and put the balls on one of those,
+     * which made the powerup a no-op on every level that has no
+     * teleporter bricks (most of them).  david4599 reported
+     * "power-up de téléportation qui ne marche pas" (2026-04-21).
+     *
+     * ASM reference: MAIN.ASM:1526-1563 Teleporte_Ball picks a random
+     * (x, y) in [bord+100 .. limite-100) and re-rolls if any corner
+     * lands on an incassable brick.
+     *
+     * P1-ASM-13 one-shot semantics preserved: on pickup every ball
+     * teleports once, then current_option is cleared by the shared
+     * @@reset_current_option path at MAIN.ASM:2883.
      * ------------------------------------------------------------------ */
     case POWERUP_TELEPOD:
         {
-            int tele_bricks[BRICK_COUNT];
-            int tele_count = 0;
+            int teleported = 0;
             int tj;
-            for (tj = 0; tj < BRICK_COUNT; tj++) {
-                if (g->bricks[tj].active && g->bricks[tj].type == BRICK_TELEPORTER)
-                    tele_bricks[tele_count++] = tj;
+            for (tj = 0; tj < g->ball_count; tj++) {
+                if (!g->balls[tj].active) continue;
+                teleport_ball_random(g, &g->balls[tj]);
+                g->balls[tj].telepod_timer = DELAI_TELEPOD;
+                teleported = 1;
             }
-            if (tele_count > 0) {
-                for (tj = 0; tj < g->ball_count; tj++) {
-                    if (!g->balls[tj].active) continue;
-                    int dest = tele_bricks[GetRandomValue(0, tele_count - 1)];
-                    g->balls[tj].x = g->bricks[dest].x;
-                    g->balls[tj].y = g->bricks[dest].y;
-                    g->balls[tj].telepod_timer = DELAI_TELEPOD;
-                }
-                if (g->audio) audio_play(g->audio, SFX_TELEPOD);
-            }
-            /* One-shot: do NOT set current_option. MAIN.ASM @@reset_current_option
-             * clears it immediately after the first Refresh_Ball. */
+            if (teleported && g->audio) audio_play(g->audio, SFX_TELEPOD);
         }
         break;
 
@@ -1543,6 +1541,63 @@ static void detect_collision_cursor(Game *g) {
 }
 
 /* --------------------------------------------------------------------------
+ * teleport_ball_random  — MAIN.ASM:1526-1563 Teleporte_Ball.
+ *
+ * Teleports the ball to a random free position inside the play area.
+ *
+ *   X ∈ [bord_x+100, limite_x-100)      = [212, 428)
+ *   Y ∈ [bord_y+100, limite_y-100)      = [100, 316)
+ *
+ * For each candidate position, all 4 sprite corners are probed against
+ * the brick grid (MAIN.ASM:1695-1726 Test_Random_Pos):
+ *   - If any corner lands on an INCASSABLE brick → retry.
+ *   - Normal / transparent / teleporter bricks are acceptable landing
+ *     zones (only incassable = 0x08 fails the test).
+ *
+ * Shared by both entry points (MAIN.ASM):
+ *   1509  option_telepod_p's Refresh_Ball branch (per-ball one-shot)
+ *   4069  @@teleportation (ball hits a BRICK_TELEPORTER)
+ *
+ * The ASM retries forever; we cap at ASM_TELEPORT_RETRIES to stay
+ * deterministic if a level somehow walls in the whole centre.
+ * -------------------------------------------------------------------------- */
+#define TELEPORT_RETRIES_CAP 64
+
+static int teleport_corner_blocked(Game *g, int x, int y) {
+    int col, row, idx;
+    if (x < PLAY_X1 || x >= PLAY_X2) return 1;
+    if (y < PLAY_Y1 || y >= PLAY_W)  return 1;
+    col = (x - PLAY_X1) >> 5;       /* div BRICK_W = 32 */
+    row = (y - PLAY_Y1) >> 4;       /* div BRICK_H = 16 */
+    idx = row * BRICK_COLS + col;
+    if (idx < 0 || idx >= BRICK_COUNT) return 0;
+    if (!g->bricks[idx].active) return 0;
+    /* MAIN.ASM:1722  cmp al,incassable; je @@bad — only exact 0x08 fails. */
+    return (g->bricks[idx].type == BRICK_INDESTRUCTIBLE) ? 1 : 0;
+}
+
+static void teleport_ball_random(Game *g, Ball *b) {
+    int tries;
+    for (tries = 0; tries < TELEPORT_RETRIES_CAP; tries++) {
+        /* MAIN.ASM:1533-1542 — raw get_random, then add base offset. */
+        int rx = GetRandomValue(PLAY_X1 + 100, PLAY_X2 - 100 - 1);
+        int ry = GetRandomValue(PLAY_Y1 + 100, PLAY_W  - 100 - 1);
+        /* Test_Random_Pos is called 4 times with (esi, edi) =
+         * (0, 0), (size_y, 0), (0, size_x), (size_y, size_x) —
+         * the four sprite corners. MAIN.ASM:1544-1560. */
+        if (teleport_corner_blocked(g, rx,           ry          )) continue;
+        if (teleport_corner_blocked(g, rx + BALL_W-1, ry          )) continue;
+        if (teleport_corner_blocked(g, rx,           ry + BALL_H-1)) continue;
+        if (teleport_corner_blocked(g, rx + BALL_W-1, ry + BALL_H-1)) continue;
+        b->x = rx;
+        b->y = ry;
+        return;
+    }
+    /* Cap reached — bail without moving. Rare; means 64 rolls all hit
+     * incassable bricks in the centre band. The ASM would loop forever. */
+}
+
+/* --------------------------------------------------------------------------
  * game_update
  *
  * Per-frame game logic.  Must be called once per frame at 60 Hz.
@@ -2038,22 +2093,13 @@ void game_update(Game *g, const FrameInput *input) {
                 continue;
             }
 
-            /* Teleporter brick: ball teleports to a random other teleporter.
-             * MAIN.ASM:4071  play_sound iff_telepod */
+            /* Teleporter brick: MAIN.ASM:4067-4073 @@teleportation calls
+             * Teleporte_Ball which picks a random free position in the
+             * play area (NOT another teleporter brick — common mis-read
+             * of the logic). Mirrors `teleport_ball_random`. */
             if (g->bricks[bc.brick_index].type == BRICK_TELEPORTER) {
-                int tele_bricks[BRICK_COUNT];
-                int tele_count = 0;
-                for (j = 0; j < BRICK_COUNT; j++) {
-                    if (j != bc.brick_index && g->bricks[j].active
-                        && g->bricks[j].type == BRICK_TELEPORTER)
-                        tele_bricks[tele_count++] = j;
-                }
-                if (tele_count > 0) {
-                    int dest = tele_bricks[GetRandomValue(0, tele_count - 1)];
-                    g->balls[i].x = g->bricks[dest].x;
-                    g->balls[i].y = g->bricks[dest].y;
-                    g->balls[i].telepod_timer = DELAI_TELEPOD;
-                }
+                teleport_ball_random(g, &g->balls[i]);
+                g->balls[i].telepod_timer = DELAI_TELEPOD;
                 if (g->audio) audio_play(g->audio, SFX_TELEPOD);
                 /* Skip normal scoring/powerup spawn for teleporter hits */
                 ball_move(&g->balls[i]);
