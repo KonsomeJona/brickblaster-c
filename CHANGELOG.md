@@ -24,6 +24,52 @@ _nothing yet_
 
 ---
 
+## [0.1.4] — 2026-04-21
+
+### Added
+- **POWERUP_COLLISION (24/24) is now fully implemented** in 2P modes
+  (coop + duel). Pickup snapshots `collision_flag = paddle_2.x -
+  paddle.x`; for the next `DELAI_OPTION` (600) frames the two cursors
+  push each other instead of overlapping, matching
+  `MAIN.ASM:2274-2316 detect_collision_cursor`. Required per-paddle
+  `min_x` / `max_x` fields on the `Paddle` struct (mirrors ASM
+  `cursor.sprite_min_x` / `sprite_max_x`). Also corrected
+  `powerup_duration(POWERUP_COLLISION)` which was wrongly marked
+  "instant" — the ASM pickup leaves the effect timed
+  (`MAIN.ASM:5687-5691 detect_prise_option`). 1P solo play unaffected.
+
+### Fixed
+- **Hallucinated world name "Eclipse"** (world 1 is "Arcade" per
+  upstream `Blaster*.cfg menu_text_4b`). Eclipse is the *demomaker
+  team* name, not a world name. Removed dead `STR_SPACE` / `STR_ECLIPSE`
+  enum entries plus their 12 translations (6 languages × 2) — never
+  referenced; the menu already uses `STR_M_SPACE` / `STR_M_ARCADE`
+  correctly. Fixed 3 source comments and the stale audit note that
+  had the fix backwards.
+
+### Changed
+- **README attribution rewritten with sourced facts** (Nov 2024 email
+  thread with Marc Radermacher + david4599):
+  - Marc proactively transmitted the sources to david4599 in early
+    2024 for GitHub publication (was phrased as "convinced Marc to
+    open-source the assembly" — no upstream source for that).
+  - `BrickBlaster-EOS-Archive` description corrected to also mention
+    WinEOS 4.00 Alpha and the standalone EOS 3.05 / 3.06 DOS extenders.
+  - Carapace (Softplace) credited as *developer*, Media Pocket as
+    *publisher* (previously conflated as "published by Media Pocket
+    via Carapace").
+  - "Eclipse **demoscene** team" → "Eclipse **demomaker** team" (4
+    occurrences) to match upstream wording.
+  - WinEOS described as the Windows/DirectX port of EOS (Eclipse
+    Operating System), not a generic "DirectX wrapper".
+  - Localisation claim fixed: UI is fully translated to 6 languages
+    (EN/FR/DE/ES/IT/PT, 106 entries each), not "partial" for DE/IT/PT.
+  - david4599 credited by his chosen pseudonym only (his request).
+  - Port-author link deduped to a single `[Jonathan Odul
+    (konsomejona)](https://github.com/konsomejona)` entry.
+
+---
+
 ## [0.1.3] — 2026-04-20
 
 ### Fixed
