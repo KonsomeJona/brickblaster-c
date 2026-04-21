@@ -166,22 +166,26 @@ int powerup_collected(const Powerup *p, const Paddle *paddle)
 {
     if (!p->active) return 0;
 
-    /* Powerups are drawn at 2x size, centred on the original sprite position.
-     * Draw code: ox = p->x - OPTION_W/2, oy = p->y - OPTION_H/2, scaled 2x.
-     * Visual bounds: [p->x - OPTION_W/2 .. p->x + 3*OPTION_W/2] x same for y.
-     * Hitbox matches the visual. */
-    int vis_left   = p->x - OPTION_W / 2;
-    int vis_right  = vis_left + OPTION_W * 2;
-    int vis_top    = p->y - OPTION_H / 2;
-    int vis_bottom = vis_top + OPTION_H * 2;
-
-    /* Y: visual must overlap the paddle row window */
-    if (vis_bottom < PADDLE_ROW_Y) return 0;
-    if (vis_top > PADDLE_ROW_Y + OPTION_H * 2) return 0;
-
-    /* X: visual must overlap the paddle */
-    if (vis_right <= paddle->x) return 0;
-    if (vis_left >= paddle->x + paddle->w) return 0;
+    /* Hitbox is the native OPTION_W × OPTION_H sprite box (26 × 24),
+     * matching the ASM checks at MAIN.ASM:5579-5585 (Y window) and
+     * MAIN.ASM:5617-5624 (X containment).
+     *
+     * Earlier versions of this port inflated the hitbox to 2x the
+     * sprite size (a leftover from the Wear OS draw path, which
+     * renders at 2x for the small watch screen).  Desktop players
+     * were collecting powerups without the paddle visibly touching
+     * them.  Reported by david4599 (2026-04-21):
+     * "leurs hitbox de collision qui semblent trop grandes".
+     *
+     * Y: pickup only while powerup.y is inside the paddle row band
+     *    [PADDLE_ROW_Y, PADDLE_ROW_Y + OPTION_H].
+     * X: ASM-exact — the powerup must be entirely within the paddle
+     *    width (option.x >= paddle.x AND option.x + OPTION_W <=
+     *    paddle.x + paddle.w). Partial overlap does NOT collect. */
+    if (p->y < PADDLE_ROW_Y)                return 0;
+    if (p->y > PADDLE_ROW_Y + OPTION_H)     return 0;
+    if (p->x < paddle->x)                   return 0;
+    if (p->x + OPTION_W > paddle->x + paddle->w) return 0;
 
     return 1;
 }
