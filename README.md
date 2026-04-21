@@ -17,9 +17,11 @@
 > and the Watcom/DirectX toolchain to rebuild the 1999 binary.
 >
 > Companion archive: **[david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)** —
-> unmodified 1999 binaries and the **WinEOS** runtime (the Windows/DirectX
-> port of EOS — *Eclipse Operating System*, the custom DOS extender the
-> Eclipse demomaker team originally built to host BrickBlaster).
+> the unmodified archival snapshot: original sources and 1999 binaries,
+> the **WinEOS** 4.00 Alpha runtime, and the standalone **EOS** 3.05 /
+> 3.06 DOS extenders (EOS = *Eclipse Operating System*, the custom
+> DOS extender the Eclipse demomaker team built for their productions,
+> later adapted to Windows/DirectX as WinEOS to host BrickBlaster).
 >
 > This repo is a **C/raylib translation** of those sources, byte-exact
 > for all gameplay constants and file formats. Every non-trivial
@@ -159,15 +161,22 @@ Remaining deliberate deviations are listed in `audit-findings.md`.
 - **Frédéric Box** ("Profil") — graphics
 - **Régis Vidal** ("Light Show") — code (WinEOS)
 
-Published by [Media Pocket](https://www.abandonware-france.org/compagnies/media-pocket-1019/)
-via [Carapace (Softplace)](https://www.abandonware-france.org/compagnies/carapace-82/).
+Developed by [Carapace (Softplace)](https://www.abandonware-france.org/compagnies/carapace-82/),
+published by [Media Pocket](https://www.abandonware-france.org/compagnies/media-pocket-1019/).
 
 **Source preservation & upstream archive (2024):**
-[david4599](https://github.com/david4599) — packaged the Watcom 11.0B +
-DirectX 6 SDK build process (`build.bat`), documented the patches
-required to run the 1999 binary on modern Windows, and curates
-[BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
-(unmodified 1999 binaries + WinEOS runtime).
+In early 2024, **Marc Radermacher** entrusted the original source tree
+to [david4599](https://github.com/david4599), who published it on GitHub
+as two repositories:
+- [BrickBlaster](https://github.com/david4599/BrickBlaster) — the
+  working source tree with a ready-to-use `build.bat` (Watcom 11.0B +
+  DirectX 6 SDK) and documented patches (`FILE.ASM` env-var limit and
+  `MAIN.ASM` privileged-instruction fix) so the 1999 binary rebuilds
+  cleanly on Windows 95 through 11.
+- [BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
+  — the unmodified archival snapshot: original sources and 1999
+  binaries, WinEOS 4.00 Alpha, and the standalone EOS 3.05 / 3.06
+  DOS extenders.
 
 **C/raylib port (2026):** [Jonathan Odul](https://github.com/konsomejona)
 ([konsomejona](https://github.com/konsomejona)).
