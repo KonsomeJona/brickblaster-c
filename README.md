@@ -2,11 +2,21 @@
 
 <img src="img/BrickBlaster_banner.png" alt="Brick Blaster Banner">
 
+[![Status: preview](https://img.shields.io/badge/status-preview-orange)](#known-gaps-vs-the-1999-original)
 [![Upstream ASM source](https://img.shields.io/badge/upstream-david4599%2FBrickBlaster-blue?logo=github)](https://github.com/david4599/BrickBlaster)
 [![EOS Archive](https://img.shields.io/badge/archive-david4599%2FBrickBlaster--EOS--Archive-blue?logo=github)](https://github.com/david4599/BrickBlaster-EOS-Archive)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL_v3-blue.svg)](LICENSE)
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
+
+> ⚠️ **Preview / work in progress.** The ASM-level internals (gameplay
+> constants, level format, XOR codec, power-up tables, collision LUT)
+> are ported byte-for-byte and documented with ASM line citations, but
+> several UI / visual layers (menu layout, intro sequence, some power-up
+> animations, iron-ball behaviour against unbreakable bricks, etc.) still
+> deviate from the 1999 binary. See [Known gaps vs the 1999 original](#known-gaps-vs-the-1999-original)
+> below. Bug reports welcome — particularly from players who remember
+> the original.
 
 > **Based on the original x86 assembly sources** of BrickBlaster,
 > released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demomaker
@@ -44,16 +54,63 @@ A polished Arkanoid-style brick breaker with:
 
 ## Fidelity goal
 
-**100% faithful to the original 1999 x86 assembly**. Physics, collisions,
-scoring, power-up frequencies, high-score XOR codec, level file format,
-sprite offsets, timing constants — all ported byte-for-byte from
-`MAIN.ASM`, `HISCORE.ASM`, `FONTE.ASM`, `EDITOR.ASM`, `FILE.ASM`, `DRAW.ASM`,
-`MOUSE.ASM`, `Blaster.inc`, and the three language config files.
+The **target** is byte-exact parity with the 1999 x86 binary. The
+current state of play:
 
-The port was audited across three iterations, with each divergence from
-the original traced back to specific ASM lines. See
+**Ported byte-for-byte from the ASM** (stable, cross-checked against
+`MAIN.ASM` / `HISCORE.ASM` / `FONTE.ASM` / `EDITOR.ASM` / `FILE.ASM` /
+`DRAW.ASM` / `MOUSE.ASM` / `Blaster.inc` / `Blaster*.cfg`):
+- Physics & collision LUT, ball/angle/speed bookkeeping
+- Scoring, per-difficulty spawn frequencies, `Time_Between_Option`
+- 24-entry `struc_options` power-up table + per-difficulty frequency triplets
+- High-score XOR codec and `blaster.scr` on-disk layout
+- Level file format (`.lv0` / `.lv1` / `.lv2`, 390 bytes × 80 levels)
+- Sprite tile offsets and per-world palette selection
+- Timing constants (`DELAI_OPTION`, `DELAI_DEMO`, bonus life threshold,
+  etc.)
+
+**Still deviates from the 1999 original** (targeted for upcoming fixes —
+see [Known gaps](#known-gaps-vs-the-1999-original)):
+- Menu layout / visuals and some control paths
+- Intro sequence composition and framing
+- Some power-up sprite animations and collision-box sizing
+- Iron-ball behaviour against unbreakable bricks
+- In-game ESC → menu on desktop
+- Teleport power-up animation
+
+Per-iteration audit trail with ASM line citations:
 [audit-findings.md](audit-findings.md) and
 [audit-asm-faithful.md](audit-asm-faithful.md).
+
+## Known gaps vs the 1999 original
+
+Reported by upstream author **david4599** against `v0.1.4`, 2026-04-21.
+Each item is tracked and will be addressed in upcoming releases:
+
+- **Menu**: `Brick Blaster` logo not pinned at top; selection highlight
+  is a square instead of a rounded shape matching the logo; selection
+  text does not follow the mouse; sound settings screen missing; the
+  `MAIN MENU` header is cropped.
+- **Unbreakable bricks** flicker instead of rendering stable.
+- **Ball counter glitch**: the player is sometimes handed `3 balles`
+  mid-game with no powerup pickup to justify it.
+- **Power-ups**: collision hitboxes appear larger than the sprite;
+  paddle and power-up animations don't play through correctly;
+  **teleport** powerup is non-functional; **iron ball** stays red and
+  *bounces* off unbreakable bricks instead of **passing through** them
+  (the original even slows the tick when several iron balls are
+  traversing a wall of unbreakables).
+- **ESC / Escape** does not return to the menu from an in-progress
+  game on Windows desktop.
+- **Intro**: composition differs from the 1999 intro; `assets/title/media.png`
+  is present but not wired to the intro pipeline; the animated
+  "Brick Blaster" logo and the credits stills currently play at points
+  where the original does not.
+- **Android build**: `android/` has no `README.md` even though the main
+  README links to one. Either the doc or the link needs to be added.
+
+Contributions / further bug reports very welcome. Open an issue or
+a PR.
 
 ## Build
 
