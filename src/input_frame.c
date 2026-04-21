@@ -155,8 +155,13 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     }
 #endif
 
-    /* === Pause === */
-    out->pause_pressed = IsKeyPressed(KEY_P) || gamepad_start() || pause_button_hit;
+    /* === Pause ===
+     * Both `P` (per 1999 keybinding) and `ESC` (desktop UX convention)
+     * toggle pause. ESC in the PAUSED state is handled separately in
+     * main.c as an "exit to menu" shortcut — the pause handler there
+     * consumes it before this flag reaches the resume path. */
+    out->pause_pressed = IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)
+                      || gamepad_start() || pause_button_hit;
 
     /* P2 defaults — filled on demand by frame_input_poll_p2(). */
     out->p2_left = 0;

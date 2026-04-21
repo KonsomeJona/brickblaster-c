@@ -485,13 +485,25 @@ static void UpdateDrawFrame(void) {
         int resume_pressed = pause_handle_input(&state, &fi);
         /* EXIT may have changed state to STATE_MENU — don't override it */
         if (state.game_mode != STATE_PAUSED) break;
+
+        /* ESC from a paused game exits to the main menu — desktop UX
+         * convention (David feedback, 2026-04-21). Checked before the
+         * generic "any key resumes" block so ESC gets the priority
+         * interpretation. Also matches pause_pressed logic in
+         * input_frame.c where ESC toggles pause from PLAYING. */
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            state.game_mode    = STATE_MENU;
+            state.current_menu = 1;
+            game.state         = STATE_MENU;
+            break;
+        }
+
         if (pause_cooldown > 0) {
             pause_cooldown--;
         } else if (resume_pressed ||
                    GetKeyPressed() != 0 ||
                    fi.click_pressed ||
                    fi.pause_pressed ||
-                   IsKeyPressed(KEY_ESCAPE) ||
                    gamepad_confirm() || gamepad_back()
         ) {
             /* MAIN.ASM:1265-1271 @@wait: resume on ANY key (`cmp B [ebp+all],Off`)

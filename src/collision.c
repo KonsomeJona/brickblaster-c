@@ -210,6 +210,17 @@ static int check_brick_at_point(
          * destroys them. Handled specially in collision_bricks loop. */
         if (is_iron && b->type == BRICK_NORMAL) return 0;
 
+        /* Iron ball also passes through indestructible bricks without
+         * bouncing. MAIN.ASM:2846 sets `sprite_rebond,Off` on the ball
+         * when option_iron_ball is active, which makes the bounce block
+         * at MAIN.ASM:3862-3864 (`cmp sprite_rebond,Off; je @@cont`)
+         * skip the direction-flip. Result: the iron ball travels straight
+         * through every non-destroyable brick it would normally bounce
+         * off. Previously our port only handled the NORMAL case, so iron
+         * balls were bouncing off incassable walls — reported upstream by
+         * david4599 (2026-04-21). */
+        if (is_iron && b->type == BRICK_INDESTRUCTIBLE) return 0;
+
         /* Mark as hit this frame */
         level_flag[index] = 1; /* MAIN.ASM:3991  mov B [edi+ebx],On */
 
