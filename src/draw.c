@@ -538,22 +538,43 @@ static void draw_balls(DrawContext *dc, const Game *g) {
         const Ball *b = &g->balls[i];
         if (!b->active) continue;
 
-        /* Select sprite row: P2 in duel uses blue row, everyone else uses orange.
-         * DRAW.ASM uses sprite_current_adrs which is set per-ball at init:
-         *   P1 → ball_orange_o (Blaster.inc:333)
-         *   P2 in dual → ball_blue_o (Blaster.inc:332)
-         * F5 P2-ASM-43: iron ball has NO sprite change in ASM
-         * (MAIN.ASM:6627-6630 option_iron_ball_p: ret — no sprite_current_adrs
-         * update). Render per owner colour only. */
+        /* Select sprite row.  Default (no iron):
+         *   P1             → ball_orange_o (Blaster.inc:333)
+         *   P2 in dual     → ball_blue_o   (Blaster.inc:332)
+         *
+         * Iron ball (option_iron_ball active): MAIN.ASM:2844-2849 sets
+         * sprite_current_adrs to `ball_blue_o` for every ball on every
+         * frame, then at MAIN.ASM:2855-2862 adds `+9` to the address if
+         * `dual_flag && player == player_2`.  Since ball_blue_o is at
+         * offset 0 and ball_orange_o at offset 9, this effectively
+         * INVERTS the dual-mode colour coding while iron is active:
+         *   1P / 2P coop  → both balls blue
+         *   2P dual       → P1 becomes blue, P2 becomes orange
+         *
+         * Earlier versions of this port missed the per-frame sprite
+         * update (looked only at `option_iron_ball_p`, which is a `ret`
+         * — the sprite swap is in the ball update loop, not the pickup
+         * handler). Reported upstream by david4599 (2026-04-21):
+         * "iron ball qui reste rouge". */
         int is_p2_dual = (g->game_mode == 2 && i >= 1);
         Rectangle src;
         if (b->is_ghost) {
             /* Ghost/bubble ball: use ghost sprite (bubble-like appearance).
              * Blaster.inc:337-338  ghost_ball_blue/orange_o
-             * MAIN.ASM:3352  sprite_adrs += 18 (offset to ghost variant) */
-            src = is_p2_dual ? SR_GHOST_BLUE : SR_GHOST_ORANGE;
+             * MAIN.ASM:3352  sprite_adrs += 18 (offset to ghost variant).
+             * Iron overlay: MAIN.ASM:2851-2853 mirrors the regular-ball
+             * swap — ghost_ball_blue_o, +9 for P2 in dual. */
+            if (b->is_iron) {
+                src = is_p2_dual ? SR_GHOST_ORANGE : SR_GHOST_BLUE;
+            } else {
+                src = is_p2_dual ? SR_GHOST_BLUE : SR_GHOST_ORANGE;
+            }
         } else {
-            src = is_p2_dual ? SR_BALL_BLUE : SR_BALL_ORANGE;
+            if (b->is_iron) {
+                src = is_p2_dual ? SR_BALL_ORANGE : SR_BALL_BLUE;
+            } else {
+                src = is_p2_dual ? SR_BALL_BLUE : SR_BALL_ORANGE;
+            }
         }
 
         Vector2 pos = { (float)b->x, (float)b->y };
