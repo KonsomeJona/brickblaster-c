@@ -333,6 +333,13 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->menu_bg, src, 0, 0, WHITE);
     }
 
+    /* 1b. "Brick Blaster" logo (623x114) at (0, 0) — sourced from MENU.png
+     * at (0, 1103). Blaster.inc:178-182 icon_logo_o/pos/size. */
+    if (m->assets && m->assets->menu_image_loaded) {
+        Rectangle lsrc = { 0, 1103, 623, 114 };
+        blit(m->assets->menu_image, lsrc, 0, 0, WHITE);
+    }
+
     /* 2. Menu icon (259x260) at (189, 141), source from MENU.png. */
     if (m->assets && m->assets->menu_image_loaded) {
         Rectangle isrc = ICON_SRC[MENU_TO_ICON[menu]];
