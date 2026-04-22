@@ -371,6 +371,17 @@ static void UpdateDrawFrame(void) {
      * --------------------------------------------------------------- */
     case STATE_READY_TO_PLAY:
     case STATE_READY_TO_PLAY_AGAIN:
+        /* ESC bails out of the session back to the main menu — modern UX
+         * convention (not in ASM, which only listened for fire on this
+         * overlay). Checked before spawn/draw so a stray press doesn't
+         * initialise a game that the user immediately abandons. */
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            state.game_mode    = STATE_MENU;
+            state.current_menu = 1;
+            game.state         = STATE_MENU;
+            game_initialized   = 0;
+            break;
+        }
         /* P1-ASM-17: MAIN.ASM:4695-4705 fires option_text_again then
          * option_text_ready back-to-back on respawn. Start the timer when
          * we transition into _AGAIN (prev_ready_state tracks the previous
@@ -531,6 +542,15 @@ static void UpdateDrawFrame(void) {
      * MAIN.ASM:4666-4695
      * --------------------------------------------------------------- */
     case STATE_GAME_OVER:
+        /* ESC short-circuits the hiscore entry and returns to menu —
+         * modern UX convention (not in ASM). */
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            game_over_timer  = 0;
+            game_initialized = 0;
+            state.game_mode  = STATE_MENU;
+            input_wait_click_release();
+            break;
+        }
         game_over_timer++;
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
