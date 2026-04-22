@@ -64,6 +64,8 @@
 #include "powerup.h"
 #include "font.h"
 #include "assets.h"
+#include "i18n.h"
+#include "screen_overlays.h"
 
 #if defined(BRICKBLASTER_MOBILE)
 #include "mobile_controls.h"
@@ -855,6 +857,18 @@ static void draw_hud(DrawContext *dc, const Game *g) {
                 };
                 DrawTextureRec(dc->assets->sprite_sheet, SR_HUD_LIFE_P2, pos, WHITE);
             }
+        }
+    }
+
+    /* Pickup text banner — MAIN.ASM:347 last_print + panel_info blit.
+     * Appears on powerup collection and holds for pickup_text_timer frames.
+     * 24 STR_OPT_POW_* strings map 1-to-1 onto PowerupType (0..23). */
+    if (g->pickup_text_timer > 0 && g->pickup_text_type >= 0 &&
+        g->pickup_text_type < POWERUP_COUNT) {
+        const char *msg = i18n(STR_OPT_POW_BALL_3 + (int)g->pickup_text_type);
+        if (msg && msg[0]) {
+            font_draw_string(&dc->font, msg,
+                             PANEL_INFO_POS_X, PANEL_INFO_POS_Y, WHITE);
         }
     }
 }

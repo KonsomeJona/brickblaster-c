@@ -426,6 +426,8 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
     g->ghost_active       = 0;
     g->current_option_count = 0;
     g->current_option     = POWERUP_COUNT;  /* sentinel: no active timed powerup */
+    g->pickup_text_timer  = 0;
+    g->pickup_text_type   = POWERUP_COUNT;
 
     g->ball_count     = 0;
     g->powerup_count  = 0;
@@ -747,6 +749,12 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
     int i;
     int duration = powerup_duration(type);  /* 0=instant, >0=timed, -1=permanent */
     int is_timed = (duration > 0);
+
+    /* Pickup text banner — mirrors MAIN.ASM:347 last_print + panel_info
+     * blit of the option_text_* string. Instant powerups flash for 2s,
+     * timed ones mirror the effect duration. */
+    g->pickup_text_type  = type;
+    g->pickup_text_timer = is_timed ? duration : 120;
     int is_per_paddle_laser = (type == POWERUP_SHOOT || type == POWERUP_MINI_SHOOT);
     /* Per-paddle size/reverse (MAIN.ASM:6491/6500/6562 option_*_ship_p / option_reverse_p)
      * — like laser, these run independently per player and do not occupy
@@ -1184,6 +1192,7 @@ static void handle_life_lost(Game *g) {
      * reset on full game_init (line ~334) or level advance. */
     deactivate_current_option(g);
     g->ghost_active = 0;  /* ghost is instant, not tracked via current_option */
+    g->pickup_text_timer = 0;  /* hide any lingering pickup banner */
 
     /* Per-paddle laser/size/reverse state — cleared on the losing paddle only
      * (P1-1 from audit). ASM test_game_over re-inits the losing cursor only. */
@@ -1626,6 +1635,8 @@ void game_update(Game *g, const FrameInput *input) {
     for (i = 0; i < BRICK_COUNT; i++) {
         if (g->bricks[i].reflet_timer > 0) g->bricks[i].reflet_timer--;
     }
+
+    if (g->pickup_text_timer > 0) g->pickup_text_timer--;
 
     /* MAIN.ASM:2353-2409 destroy_vaisseau — tick the ball-lost paddle
      * explosion on both paddles.  When a paddle's explo_timer reaches 0

@@ -219,6 +219,13 @@ typedef struct {
     int          current_option_count; /* countdown timer for active timed powerup (DELAI_OPTION=600) */
     PowerupType  current_option;       /* active timed powerup type, or POWERUP_COUNT if none */
 
+    /* Pickup text banner — stamped on every apply_powerup, rendered at the
+     * panel_info position (MAIN.ASM:347 last_print + panel_info.sprite_adrs,
+     * Blaster.cfg option_text_* strings).  Instant powerups also flash the
+     * text for a short duration; timed ones linger roughly current_option_count. */
+    int          pickup_text_timer;    /* frames remaining; 0 = hidden */
+    PowerupType  pickup_text_type;     /* last-collected powerup */
+
     /* POWERUP_COLLISION (duel / coop) — MAIN.ASM:6830-6836 option_collision_p
      * stores (cursor_2.x - cursor_1.x) at pickup time.  detect_collision_cursor
      * (MAIN.ASM:2274-2316) branches on the sign every frame to decide which
