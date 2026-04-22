@@ -26,6 +26,10 @@ void credits_assets_load(CreditsAssets *a) {
         if (t.id == 0) continue;
         a->slides[a->slide_count++] = t;
     }
+    /* MAIN.ASM:145-190 @@credit — intro.flc plays first. Port uses
+     * pre-converted PNG frames in assets/intro/. */
+    a->intro = animation_load(ASSETS_BASE "intro",
+                              CREDITS_INTRO_FRAMES, CREDITS_INTRO_FPS);
     credits_reset(a);
     a->loaded = 1;
 }
@@ -34,6 +38,7 @@ void credits_assets_unload(CreditsAssets *a) {
     if (!a || !a->loaded) return;
     for (int i = 0; i < a->slide_count; i++) UnloadTexture(a->slides[i]);
     a->slide_count = 0;
+    animation_unload(&a->intro);
     a->loaded      = 0;
 }
 
@@ -42,6 +47,8 @@ void credits_reset(CreditsAssets *a) {
     a->current = 0;
     a->timer   = 0;
     a->alpha   = 0.0f;
+    a->phase   = CREDITS_PHASE_INTRO;
+    animation_reset(&a->intro);
 }
 
 void credits_update(ScreenState *state, CreditsAssets *a, const FrameInput *input) {
@@ -62,6 +69,25 @@ void credits_update(ScreenState *state, CreditsAssets *a, const FrameInput *inpu
         credits_reset(a);
         state->game_mode    = STATE_MENU;
         state->current_menu = 6;
+        return;
+    }
+
+    /* Phase 1: intro anim (MAIN.ASM:145-190 @@credit — intro.flc plays
+     * first). Advance the animation; when it finishes, switch to slides. */
+    if (a->phase == CREDITS_PHASE_INTRO) {
+        if (a->intro.frame_count > 0) {
+            animation_update(&a->intro);
+            if (animation_is_finished(&a->intro)) {
+                a->phase = CREDITS_PHASE_SLIDES;
+                a->timer = 0;
+                a->current = 0;
+                a->alpha = 0.0f;
+            }
+        } else {
+            /* No intro frames loaded — skip straight to slides. */
+            a->phase = CREDITS_PHASE_SLIDES;
+            a->timer = 0;
+        }
         return;
     }
 
@@ -107,6 +133,22 @@ void credits_draw(CreditsAssets *a) {
     if (!a || !a->loaded) return;
 
     ClearBackground((Color){0, 0, 0, 255});
+
+    /* Phase 1: intro — center the current frame full-screen. */
+    if (a->phase == CREDITS_PHASE_INTRO) {
+        if (a->intro.frame_count > 0) {
+            int fi = a->intro.current_frame;
+            if (fi < 0) fi = 0;
+            if (fi >= a->intro.frame_count) fi = a->intro.frame_count - 1;
+            Texture2D t = a->intro.frames[fi];
+            if (t.id != 0) {
+                int x = (SCREEN_W - t.width)  / 2;
+                int y = (SCREEN_H - t.height) / 2;
+                DrawTexture(t, x, y, WHITE);
+            }
+        }
+        return;
+    }
 
     if (a->current < 0 || a->current >= a->slide_count) return;
     Texture2D t = a->slides[a->current];
