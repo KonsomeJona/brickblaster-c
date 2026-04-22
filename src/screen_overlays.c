@@ -37,10 +37,24 @@ void draw_ready_screen(ScreenState *state) {
     draw_option_text(i18n(STR_OPT_READY));
 }
 
-/* MAIN.ASM:1261 — option_text_paused */
+/* MAIN.ASM:1261 — option_text_paused
+ *
+ * Port adds a small in-pause audio toggle panel: M toggles music,
+ * S toggles SFX. The state lines render above the main paused label
+ * so the user can both see and change the flags without leaving play. */
 void draw_pause_screen(ScreenState *state) {
-    (void)state;
     draw_option_text(i18n(STR_OPT_PAUSED));
+    if (!state || !s_font_ready) return;
+
+    char buf[40];
+    snprintf(buf, sizeof(buf), "music [m]: %s",
+             state->music_enabled ? "on " : "off");
+    font_draw_string(&s_font, buf, PANEL_INFO_POS_X,
+                     PANEL_INFO_POS_Y - 52, WHITE);
+    snprintf(buf, sizeof(buf), "sfx   [s]: %s",
+             state->sfx_enabled ? "on " : "off");
+    font_draw_string(&s_font, buf, PANEL_INFO_POS_X,
+                     PANEL_INFO_POS_Y - 32, WHITE);
 }
 
 /* MAIN.ASM:4681 — option_text_over */
@@ -74,9 +88,15 @@ void draw_play_again_screen(ScreenState *state) {
     draw_option_text(i18n(STR_OPT_PLAY_AGAIN));
 }
 
-/* Pause input: gamepad B exits to menu. */
+/* Pause input: gamepad B exits to menu; M / S toggle audio flags.
+ * Persistence of the flags to blaster.usr happens at shutdown
+ * (main.c ~825) — the in-pause toggle only flips state flags,
+ * the save pipeline picks them up unchanged. */
 int pause_handle_input(ScreenState *state, const FrameInput *input) {
     if (!state) return 0;
+
+    if (IsKeyPressed(KEY_M)) state->music_enabled = !state->music_enabled;
+    if (IsKeyPressed(KEY_S)) state->sfx_enabled   = !state->sfx_enabled;
 
     /* Gamepad B = exit to menu */
     if (gamepad_back()) {

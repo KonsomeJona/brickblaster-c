@@ -509,10 +509,15 @@ static void UpdateDrawFrame(void) {
             break;
         }
 
+        /* M / S are consumed by pause_handle_input as audio toggles and
+         * must NOT trigger resume — swallow those events before the
+         * generic "any key resumes" check. */
+        int audio_toggle_frame = IsKeyPressed(KEY_M) || IsKeyPressed(KEY_S);
+
         if (pause_cooldown > 0) {
             pause_cooldown--;
         } else if (resume_pressed ||
-                   GetKeyPressed() != 0 ||
+                   (!audio_toggle_frame && GetKeyPressed() != 0) ||
                    fi.click_pressed ||
                    fi.pause_pressed ||
                    gamepad_confirm() || gamepad_back()
