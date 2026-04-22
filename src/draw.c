@@ -208,6 +208,16 @@ static const int POWERUP_SPRITE_X_FLIP[POWERUP_COUNT] = {
 static const Rectangle SR_PROJ_MINI       = {  85, 164,  3, 13 };
 static const Rectangle SR_PROJ_BIG        = { 444, 339,  8, 42 };
 
+/* --- Paddle cannon recoil overlay (draw_cannon_flash frame 0) ---
+ * Blaster.inc:230-252  vaisseau_1/2_tir_left/right/big. We draw frame 0
+ * of each animation as a muzzle flash; per-player, per-cannon. */
+static const Rectangle SR_CANNON_MINI_P1_L = { 374, 183, 12, 18 };
+static const Rectangle SR_CANNON_MINI_P1_R = { 402, 183, 12, 18 };
+static const Rectangle SR_CANNON_MINI_P2_L = { 374, 405, 12, 18 };
+static const Rectangle SR_CANNON_MINI_P2_R = { 402, 405, 12, 18 };
+static const Rectangle SR_CANNON_BIG_P1    = { 446, 413, 13, 19 };
+static const Rectangle SR_CANNON_BIG_P2    = { 446, 435, 13, 19 };
+
 /* --- HUD panels --- */
 /* Blaster.inc:204  panel_level_o = 001+(screen_x*019) */
 static const Rectangle SR_PANEL_LEVEL     = {  1, 19, 30, 22 };
@@ -610,27 +620,30 @@ static void draw_cannon_flash(DrawContext *dc, const Paddle *p, int p2) {
     Rectangle src;
     int ox, oy;
     if (!p->mini_laser) {
-        /* Big shoot: single centered cannon (13x19). */
-        src = p2 ? (Rectangle){ 446, 435, 13, 19 }
-                 : (Rectangle){ 446, 413, 13, 19 };
-        ox = VAISSEAU_DECAL_X_B;
-        oy = VAISSEAU_DECAL_Y_B;
+        src = p2 ? SR_CANNON_BIG_P2 : SR_CANNON_BIG_P1;
+        ox  = VAISSEAU_DECAL_X_B;
+        oy  = VAISSEAU_DECAL_Y_B;
     } else {
-        /* Mini shoot: alternating L/R cannon — gun_side reflects the
-         * LAST shot's side (game.c toggles before computing position). */
+        /* Mini shoot: gun_side reflects the LAST shot's cannon (game.c
+         * toggles before computing the projectile position). */
         if (p->gun_side) {
-            src = p2 ? (Rectangle){ 402, 405, 12, 18 }
-                     : (Rectangle){ 402, 183, 12, 18 };
+            src = p2 ? SR_CANNON_MINI_P2_R : SR_CANNON_MINI_P1_R;
             ox  = VAISSEAU_DECAL_X_R;
         } else {
-            src = p2 ? (Rectangle){ 374, 405, 12, 18 }
-                     : (Rectangle){ 374, 183, 12, 18 };
+            src = p2 ? SR_CANNON_MINI_P2_L : SR_CANNON_MINI_P1_L;
             ox  = VAISSEAU_DECAL_X_L;
         }
         oy = VAISSEAU_DECAL_Y_L;
     }
     Vector2 pos = { (float)(p->x + ox), (float)(p->y + oy) };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+}
+
+/* Clamp an animation frame index into [0, max_frames-1]. */
+static inline int anim_frame_clamp(int frame, int max_frames) {
+    if (frame < 0) return 0;
+    if (frame > max_frames - 1) return max_frames - 1;
+    return frame;
 }
 
 /* Paddle telepod overlay — Blaster.inc:294-330 vaisseau_telepod_*.
@@ -648,17 +661,16 @@ static void draw_paddle_telepod(DrawContext *dc, const Paddle *p) {
         default: /* NORMAL */
             x = 357; base_y =  877; w =  92; sub_x =  9; break;
     }
-    int frame = (PADDLE_TELEPOD_TICKS - p->telepod_timer) / PADDLE_TELEPOD_SPEED;
-    if (frame < 0) frame = 0;
-    if (frame > PADDLE_TELEPOD_FRAMES - 1) frame = PADDLE_TELEPOD_FRAMES - 1;
+    int frame = anim_frame_clamp(
+        (PADDLE_TELEPOD_TICKS - p->telepod_timer) / PADDLE_TELEPOD_SPEED,
+        PADDLE_TELEPOD_FRAMES);
     Rectangle src = { (float)x, (float)(base_y + frame * 44), (float)w, 43.0f };
     Vector2 pos   = { (float)(p->x - sub_x), (float)(p->y - 9) };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
 /* Paddle explosion overlay — Blaster.inc:254-282 vaisseau_explo_*.
- * 8 frames stacked vertically at stride 71, one column per size.
- * While explo_timer > 0 the paddle is replaced by the current frame. */
+ * 8 frames stacked vertically at stride 71, one column per size. */
 static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     int x, w, sub_x;
     switch (p->size) {
@@ -669,40 +681,37 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
         default: /* NORMAL */
             x =   1; w = 118; sub_x = 21; break;
     }
-    int base_y = p2 ? 877 : 182;   /* Blaster.inc: P2 row sits at y=877 */
-    int frame  = (PADDLE_EXPLO_TICKS - p->explo_timer) / PADDLE_EXPLO_SPEED;
-    if (frame < 0) frame = 0;
-    if (frame > PADDLE_EXPLO_FRAMES - 1) frame = PADDLE_EXPLO_FRAMES - 1;
+    int base_y = p2 ? 877 : 182;
+    int frame = anim_frame_clamp(
+        (PADDLE_EXPLO_TICKS - p->explo_timer) / PADDLE_EXPLO_SPEED,
+        PADDLE_EXPLO_FRAMES);
     Rectangle src = { (float)x, (float)(base_y + frame * 71), (float)w, 70.0f };
     Vector2 pos   = { (float)(p->x - sub_x), (float)(p->y - 24) };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* Draw a single paddle with all overlays — exploded sprite while
+ * explo_timer is counting, otherwise normal paddle + cannon flash +
+ * optional telepod overlay on top. */
+static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
+    if (p->explo_timer > 0) {
+        draw_paddle_explosion(dc, p, p2);
+        return;
+    }
+    Rectangle src = get_paddle_rect(p, p2);
+    Vector2 pos   = { (float)p->x, (float)p->y };
+    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+    draw_cannon_flash(dc, p, p2);
+    if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
+}
+
 static void draw_paddle(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
 
-    if (g->paddle.explo_timer > 0) {
-        draw_paddle_explosion(dc, &g->paddle, 0);
-    } else {
-        Rectangle src = get_paddle_rect(&g->paddle, 0);
-        Vector2 pos   = { (float)g->paddle.x, (float)g->paddle.y };
-        DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-        draw_cannon_flash(dc, &g->paddle, 0);
-        if (g->paddle.telepod_timer > 0) draw_paddle_telepod(dc, &g->paddle);
-    }
-
-    /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68).
-     * No tint — the sprite itself is colour-coded per ASM (Blaster.inc:226). */
+    draw_one_paddle(dc, &g->paddle, 0);
+    /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68). */
     if (g->game_mode > 0) {
-        if (g->paddle_2.explo_timer > 0) {
-            draw_paddle_explosion(dc, &g->paddle_2, 1);
-        } else {
-            Rectangle src2 = get_paddle_rect(&g->paddle_2, 1);
-            Vector2 pos2   = { (float)g->paddle_2.x, (float)g->paddle_2.y };
-            DrawTextureRec(dc->assets->sprite_sheet, src2, pos2, WHITE);
-            draw_cannon_flash(dc, &g->paddle_2, 1);
-            if (g->paddle_2.telepod_timer > 0) draw_paddle_telepod(dc, &g->paddle_2);
-        }
+        draw_one_paddle(dc, &g->paddle_2, 1);
     }
 }
 
