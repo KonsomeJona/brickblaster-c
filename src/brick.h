@@ -35,6 +35,10 @@ typedef struct {
                           * deferred transparent-brick sync loop can
                           * attribute score to the correct player.
                           * MAIN.ASM:4024-4026 sprite_player dispatch. */
+    int reflet_timer;    /* Indestructible reflet animation countdown.
+                          * Stamped to NBS_REFLET on ball impact
+                          * (MAIN.ASM:4058-4061), decremented each frame
+                          * (MAIN.ASM:6220-6240) back to 0 = base beton. */
 } Brick;
 
 /* Initialise a Brick from a grid index and its raw encoded byte.

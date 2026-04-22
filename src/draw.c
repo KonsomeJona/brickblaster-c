@@ -455,18 +455,16 @@ static void draw_bricks(DrawContext *dc, const Game *g) {
 
         Rectangle src = get_brick_rect(b);
 
-        /* Indestructible brick reflet animation: in the 1999 binary this
-         * is a hit-triggered ripple (MAIN.ASM:4058-4061 stamps
-         * brique_reflet_o+next_reflet*nbs_reflet on ball impact, then
-         * MAIN.ASM:6220-6240 decrements the sprite offset each frame
-         * back to brique_beton_o). It is NOT a global ambient flash.
-         *
-         * Our earlier port used a frame-counter on/off toggle, which
-         * made every incassable brick on the level flicker in sync —
-         * david4599 reported this as painful to look at (2026-04-21).
-         * Removed for now; the proper per-brick reflet timer is on the
-         * polish checklist. Base sprite only. */
-        (void)0;
+        /* Indestructible brick reflet (hit-triggered ripple).
+         * MAIN.ASM:4058-4061 stamps brique_reflet_o+next_reflet*nbs_reflet
+         * on ball impact; MAIN.ASM:6220-6240 decrements the sprite offset
+         * each frame back to brique_beton_o.  We collapse the 5 reflet
+         * sub-frames into a single reflet_timer tracked per brick — when
+         * > 0 the reflet sprite is shown, else the base beton.  Replaces
+         * the earlier ambient whole-screen flicker. */
+        if (b->type == BRICK_INDESTRUCTIBLE && b->reflet_timer > 0) {
+            src = SR_BRICK_REFLET;
+        }
 
         Vector2 pos = { (float)b->x, (float)b->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);

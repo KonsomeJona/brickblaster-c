@@ -1610,6 +1610,13 @@ void game_update(Game *g, const FrameInput *input) {
 
     g->frame++;
 
+    /* MAIN.ASM:6220-6240 — per-frame reflet animation tick.  Each
+     * indestructible brick with reflet_timer > 0 steps one notch back
+     * toward the idle beton sprite. */
+    for (i = 0; i < BRICK_COUNT; i++) {
+        if (g->bricks[i].reflet_timer > 0) g->bricks[i].reflet_timer--;
+    }
+
     /* -----------------------------------------------------------------------
      * DEV TEST MODE: F9 toggle or auto-load on first frame if flag set.
      * Loads a test level with all brick types, forces powerup drops.

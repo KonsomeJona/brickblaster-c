@@ -231,6 +231,14 @@ static int check_brick_at_point(
             int d = brick_hit(b, 1);
             if (out_destroyed) *out_destroyed = d;
             b->last_hit_owner = ball_owner;
+        } else if (b->type == BRICK_INDESTRUCTIBLE) {
+            /* MAIN.ASM:4058-4061 — on ball impact, jump the sprite to
+             * brique_reflet_o + next_reflet*nbs_reflet (fully-on reflet
+             * state). Animation then decays one notch per frame back to
+             * brique_beton_o. We collapse the 5 reflet sub-frames into
+             * a single "reflet active" bit via reflet_timer; draw.c
+             * picks SR_BRICK_REFLET while timer > 0. */
+            b->reflet_timer = NBS_REFLET;
         }
 
         *out_index = index;

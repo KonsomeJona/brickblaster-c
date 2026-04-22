@@ -32,6 +32,7 @@ void brick_init(Brick *b, int index, unsigned char raw)
     b->raw   = raw;
     b->index = index;
     b->last_hit_owner = 0;  /* default P1 — overwritten at damage time */
+    b->reflet_timer   = 0;  /* idle beton state until first ball impact */
 
     /* Grid position */
     col  = index % BRICK_COLS;   /* Blaster.inc:453  nbs_brique_x = 13 */
