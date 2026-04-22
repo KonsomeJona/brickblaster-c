@@ -339,23 +339,10 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->assets->menu_image, isrc, ICON_DST_X, ICON_DST_Y, WHITE);
     }
 
-    /* 3. Hover indicator — original pulses the icon's 36-entry palette range
-     * toward black and back (MAIN.ASM:5758-5805, fade_option_On/Off).
-     * Since MENU.png is loaded RGBA (no indexed palette), we approximate with
-     * a black overlay whose alpha pulses at the same ~0.5 Hz cadence, scoped
-     * to the hovered quadrant — matching the original's visual effect. */
-    if (m->hover_button >= 0) {
-        Rectangle r = BTN_RECT[m->hover_button];
-        /* Original ramps 0..12 then 12..0 over ~24 frames at 60 FPS ≈ 0.4 s
-         * full cycle, so ~2.5 Hz triangle. Use a matching sine in [0..1]. */
-        float t = (float)GetTime() * 2.0f * 3.14159265f * 2.5f;
-        float pulse = 0.5f - 0.5f * cosf(t);             /* 0..1 */
-        unsigned char a = (unsigned char)(pulse * 90.0f); /* max ~35% darken */
-        DrawRectangle((int)r.x, (int)r.y, (int)r.width, (int)r.height,
-                      (Color){0, 0, 0, a});
-    }
-
-    /* 4. Cursor (14x18) at the cursor position. */
+    /* 3. Cursor (14x18) at the cursor position.
+     * Hover is indicated by the cursor sprite + the label text at the bottom
+     * — no darkening overlay (the palette-pulse approximation looked heavy
+     * against the disc artwork and isn't present in the ASM render path). */
     if (m->assets && m->assets->menu_image_loaded) {
         Rectangle csrc = { CURSOR_SRC_X, CURSOR_SRC_Y, CURSOR_W, CURSOR_H };
         float cx = m->cursor_x - CURSOR_W / 2.0f;
