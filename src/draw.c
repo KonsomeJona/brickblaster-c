@@ -218,10 +218,19 @@ static const Rectangle SR_PANEL_SCORE     = { 32, 19, 90, 22 };
  * panel_score_2_o=(444, 384) 90x22. */
 static const Rectangle SR_PANEL_SCORE_P2  = { 444, 384, 90, 22 };
 /* F5 P1-ASM-42: dedicated life indicator sprites.
- * Blaster.inc:217  panel_nbs_ball_1_o = 631 + (screen_x * 0) → (631, 0) 9x9
- * Blaster.inc:218  panel_nbs_ball_2_o = 631 + (screen_x * 9) → (631, 9) 9x9 */
-static const Rectangle SR_HUD_LIFE_P1     = { 631, 0, 9, 9 };
-static const Rectangle SR_HUD_LIFE_P2     = { 631, 9, 9, 9 };
+ * Blaster.inc:217-218 panel_nbs_ball_1/2_o points to the 9px-wide ZERO-
+ * life anchor slot at X=631. The ASM render (MAIN.ASM:6056-6072) starts
+ * there empty and for each life grows sprite_size_x by +12 and shifts
+ * sprite_current_adrs by -12, pulling ball graphics out of the atlas
+ * LEFT of 631 (where actual balls are stored at 12px stride). So X=631
+ * itself is transparent — we must source one cell to the left.
+ *
+ * Rightmost real ball is at (619, 0, 9, 9); further balls stack left
+ * with stride 12. The port draws N independent 9x9 sprites at screen
+ * positions PANEL_NBS_BALL_POS_X + i*NEXT_BALL, so a single-cell source
+ * is enough. */
+static const Rectangle SR_HUD_LIFE_P1     = { 619, 0, 9, 9 };
+static const Rectangle SR_HUD_LIFE_P2     = { 619, 9, 9, 9 };
 /* F5 P1-ASM-41c: option background + info banner — TODO.
  * MAIN.ASM:5859-5940 init_panel draws:
  *   panel_option_o = (  1, 827) 26x24  (Blaster.inc:140  option_off)
