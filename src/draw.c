@@ -192,21 +192,21 @@ static const int POWERUP_SPRITE_X_FLIP[POWERUP_COUNT] = {
     0, 0, 0, 0,
 };
 
-/* --- Projectiles (the actual projectile sprites, NOT muzzle flash) ---
- * P1-ASM-29/30: distinct sprites per owner AND per cannon side.
- * Blaster.inc:230-233 / 244-245 + P2 variants at Y=405/435.
- *   vaisseau_1_tir_left_o   = 374+(screen_x*183) → (374,183,12,18)
- *   vaisseau_1_tir_right_o  = 402+(screen_x*183) → (402,183,12,18)
- *   vaisseau_2_tir_left_o   = 374+(screen_x*405) → (374,405,12,18)
- *   vaisseau_2_tir_right_o  = 402+(screen_x*405) → (402,405,12,18)
- *   vaisseau_1_tir_big_o    = 446+(screen_x*413) → (446,413,13,19)
- *   vaisseau_2_tir_big_o    = 446+(screen_x*435) → (446,435,13,19) */
-static const Rectangle SR_PROJ_MINI_P1_L  = { 374, 183, 12, 18 };
-static const Rectangle SR_PROJ_MINI_P1_R  = { 402, 183, 12, 18 };
-static const Rectangle SR_PROJ_MINI_P2_L  = { 374, 405, 12, 18 };
-static const Rectangle SR_PROJ_MINI_P2_R  = { 402, 405, 12, 18 };
-static const Rectangle SR_PROJ_BIG_P1     = { 446, 413, 13, 19 };
-static const Rectangle SR_PROJ_BIG_P2     = { 446, 435, 13, 19 };
+/* --- Projectiles in flight ---
+ * MAIN.ASM:1947-1990 Detect_Shoot — a fired projectile copies its sprite
+ * data from `shoot_o` (big) or `mini_shoot_o` (mini), NOT from the
+ * `vaisseau_tir*` family. The vaisseau_tir / vaisseau_tir_big rectangles
+ * are the PADDLE CANNON RECOIL ANIMATION (6 and 4 frames respectively),
+ * which the port does not replay — they belong to the paddle render,
+ * not to each flying projectile.
+ *
+ * Blaster.inc:107-112  shoot_o = 444+(screen_x*339) → (444,339,8,42),
+ *                      11-frame anim (shoot_nbs_anim, stride shoot_next=3).
+ *                      We use frame 0 only.
+ * Blaster.inc:114-116  mini_shoot_o = 85+(screen_x*164) → (85,164,3,13),
+ *                      single frame. */
+static const Rectangle SR_PROJ_MINI       = {  85, 164,  3, 13 };
+static const Rectangle SR_PROJ_BIG        = { 444, 339,  8, 42 };
 
 /* --- HUD panels --- */
 /* Blaster.inc:204  panel_level_o = 001+(screen_x*019) */
@@ -621,10 +621,10 @@ static void draw_paddle(DrawContext *dc, const Game *g) {
 /* ============================================================================
  * draw_projectiles
  * DRAW.ASM:Draw_sprites — sprite_mode = tir → draw projectile sprite.
- * Mini shoot: 12x18 at (374,183) — left cannon variant used for both directions.
- * Big shoot:  13x19 at (446,413)
- * Blaster.inc:238  vaisseau_tir_left_1 = 374+(screen_x*183)
- * Blaster.inc:248  vaisseau_tir_big_1  = 446+(screen_x*413)
+ * Mini shoot: 3x13 at (85,164) — `mini_shoot_o` in Blaster.inc:114-116.
+ * Big shoot:  8x42 at (444,339) — `shoot_o` in Blaster.inc:107-112.
+ * Both come from MAIN.ASM:1947-1990 Detect_Shoot, which seeds the fired
+ * sprite's sprite_adrs from shoot_o / mini_shoot_o (NOT vaisseau_tir*).
  * ============================================================================ */
 static void draw_projectiles(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
@@ -633,30 +633,16 @@ static void draw_projectiles(DrawContext *dc, const Game *g) {
         const Projectile *p = &g->projectiles[i];
         if (!p->active) continue;
 
-        /* P1-ASM-29/30: owner + cannon-side sprite selection.
-         * ASM MAIN.ASM:6520/6536 (big), 6565/6574/6589/6598 (mini L/R per P1/P2).
-         * We pick the appropriate sprite from the 6 variants.
-         * For big shoot we don't have a left/right distinction (one centred
-         * projectile). For mini we look at the paddle's alternating gun_side
-         * at the time of firing — which we infer from the projectile X offset
-         * relative to the paddle. Since ASM tags gun_side per shot, we store
-         * which L/R sprite to use by checking proj.x vs paddle centre. */
-        Rectangle src;
-        if (p->is_big) {
-            src = (p->owner == 1) ? SR_PROJ_BIG_P2 : SR_PROJ_BIG_P1;
-        } else {
-            /* Infer mini cannon side from X position relative to owner paddle.
-             * VAISSEAU_DECAL_X_L=7, VAISSEAU_DECAL_X_R=55 — right cannon is
-             * well right of centre (74/2=37). */
-            const Paddle *own = (p->owner == 1) ? &g->paddle_2 : &g->paddle;
-            int is_right = ((p->x - own->x) > own->w / 2);
-            if (p->owner == 1) {
-                src = is_right ? SR_PROJ_MINI_P2_R : SR_PROJ_MINI_P2_L;
-            } else {
-                src = is_right ? SR_PROJ_MINI_P1_R : SR_PROJ_MINI_P1_L;
-            }
-        }
-        Vector2 pos   = { (float)p->x, (float)p->y };
+        /* Projectile sprites are shared across players — MAIN.ASM tags
+         * sprite_player on the fired entity for scoring attribution, but
+         * visually both players shoot the same `shoot` / `mini_shoot`
+         * graphic.  Center the narrower sprite on the paddle-relative
+         * spawn point (game.c places p->x with vaisseau_tir's 12px width
+         * in mind; the real projectile is 3 or 8 wide). */
+        Rectangle src = p->is_big ? SR_PROJ_BIG : SR_PROJ_MINI;
+        float pad_w   = p->is_big ? 13.0f : 12.0f;   /* cannon sprite width */
+        float offset  = (pad_w - src.width) * 0.5f;
+        Vector2 pos   = { (float)p->x + offset, (float)p->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
     }
 }
