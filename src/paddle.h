@@ -70,7 +70,18 @@ typedef struct {
     int gun_side;       /* 0=left, 1=right — alternates per shot (MAIN.ASM:1984) */
     int speed;          /* pixels per frame — MOUSE.ASM:77  speed_counter=6 */
     int prev_x;         /* previous frame X position — for magnetic ball tracking */
+    int explo_timer;    /* ball-lost explosion animation countdown.
+                         * MAIN.ASM:2353-2409 destroy_vaisseau +
+                         * Blaster.inc:254-282 vaisseau_explo_* — 8 frames
+                         * at speed 4 = 32 ticks total. While > 0 the
+                         * paddle renders the explosion sprite and the
+                         * ball respawn is deferred.  Frame index =
+                         * 7 - (explo_timer - 1) / 4. */
 } Paddle;
+
+#define PADDLE_EXPLO_FRAMES  8   /* Blaster.inc:257  vaisseau_explo_nbs_anim */
+#define PADDLE_EXPLO_SPEED   4   /* Blaster.inc:258  vaisseau_explo_speed    */
+#define PADDLE_EXPLO_TICKS   (PADDLE_EXPLO_FRAMES * PADDLE_EXPLO_SPEED)  /* 32 */
 
 /* Initialise paddle at screen centre, PADDLE_Y, normal width.
  * MAIN.ASM:1735  mov cursor_1.sprite_pos_x,eax  (centred via (limite_x-bord_x)/2)

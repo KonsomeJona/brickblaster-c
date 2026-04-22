@@ -633,21 +633,51 @@ static void draw_cannon_flash(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* Paddle explosion overlay — Blaster.inc:254-282 vaisseau_explo_*.
+ * 8 frames stacked vertically at stride 71, one column per size.
+ * While explo_timer > 0 the paddle is replaced by the current frame. */
+static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
+    int x, w, sub_x;
+    switch (p->size) {
+        case PADDLE_SIZE_LARGE:
+            x = 213; w = 143; sub_x = 19; break;
+        case PADDLE_SIZE_SMALL:
+            x = 120; w =  92; sub_x = 27; break;
+        default: /* NORMAL */
+            x =   1; w = 118; sub_x = 21; break;
+    }
+    int base_y = p2 ? 877 : 182;   /* Blaster.inc: P2 row sits at y=877 */
+    int frame  = (PADDLE_EXPLO_TICKS - p->explo_timer) / PADDLE_EXPLO_SPEED;
+    if (frame < 0) frame = 0;
+    if (frame > PADDLE_EXPLO_FRAMES - 1) frame = PADDLE_EXPLO_FRAMES - 1;
+    Rectangle src = { (float)x, (float)(base_y + frame * 71), (float)w, 70.0f };
+    Vector2 pos   = { (float)(p->x - sub_x), (float)(p->y - 24) };
+    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+}
+
 static void draw_paddle(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
 
-    Rectangle src = get_paddle_rect(&g->paddle, 0);
-    Vector2 pos   = { (float)g->paddle.x, (float)g->paddle.y };
-    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-    draw_cannon_flash(dc, &g->paddle, 0);
+    if (g->paddle.explo_timer > 0) {
+        draw_paddle_explosion(dc, &g->paddle, 0);
+    } else {
+        Rectangle src = get_paddle_rect(&g->paddle, 0);
+        Vector2 pos   = { (float)g->paddle.x, (float)g->paddle.y };
+        DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+        draw_cannon_flash(dc, &g->paddle, 0);
+    }
 
     /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68).
      * No tint — the sprite itself is colour-coded per ASM (Blaster.inc:226). */
     if (g->game_mode > 0) {
-        Rectangle src2 = get_paddle_rect(&g->paddle_2, 1);
-        Vector2 pos2   = { (float)g->paddle_2.x, (float)g->paddle_2.y };
-        DrawTextureRec(dc->assets->sprite_sheet, src2, pos2, WHITE);
-        draw_cannon_flash(dc, &g->paddle_2, 1);
+        if (g->paddle_2.explo_timer > 0) {
+            draw_paddle_explosion(dc, &g->paddle_2, 1);
+        } else {
+            Rectangle src2 = get_paddle_rect(&g->paddle_2, 1);
+            Vector2 pos2   = { (float)g->paddle_2.x, (float)g->paddle_2.y };
+            DrawTextureRec(dc->assets->sprite_sheet, src2, pos2, WHITE);
+            draw_cannon_flash(dc, &g->paddle_2, 1);
+        }
     }
 }
 

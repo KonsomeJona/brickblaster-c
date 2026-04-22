@@ -1252,8 +1252,14 @@ static void handle_life_lost(Game *g) {
     }
     g->ball_count = 0;
 
-    /* MAIN.ASM:1089  jc start_game — respawn ball on paddle */
-    game_spawn_ball(g);
+    /* MAIN.ASM:2353-2409 destroy_vaisseau — losing paddle plays the
+     * vaisseau_explo_* 8-frame sequence at speed 4 (32 ticks total)
+     * before respawn. We stamp explo_timer on the lost paddle(s) and
+     * defer game_spawn_ball until the timer ticks to 0 (handled in
+     * game_update). Fire input is a no-op while no ball is attached. */
+    for (i = 0; i < lost_n; i++) {
+        lost_paddles[i]->explo_timer = PADDLE_EXPLO_TICKS;
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -1615,6 +1621,22 @@ void game_update(Game *g, const FrameInput *input) {
      * toward the idle beton sprite. */
     for (i = 0; i < BRICK_COUNT; i++) {
         if (g->bricks[i].reflet_timer > 0) g->bricks[i].reflet_timer--;
+    }
+
+    /* MAIN.ASM:2353-2409 destroy_vaisseau — tick the ball-lost paddle
+     * explosion on both paddles.  When a paddle's explo_timer reaches 0
+     * and there's no ball in play yet, spawn the replacement (deferred
+     * from handle_life_lost). */
+    Paddle *paddles_explo[2] = { &g->paddle, &g->paddle_2 };
+    for (i = 0; i < 2; i++) {
+        if (paddles_explo[i]->explo_timer > 0) {
+            paddles_explo[i]->explo_timer--;
+            if (paddles_explo[i]->explo_timer == 0 &&
+                g->state == STATE_READY_TO_PLAY_AGAIN &&
+                g->ball_count == 0) {
+                game_spawn_ball(g);
+            }
+        }
     }
 
     /* -----------------------------------------------------------------------

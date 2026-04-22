@@ -39,6 +39,7 @@ void paddle_init(Paddle *p)
     p->gun_cooldown = 0;
     p->speed       = PADDLE_SPEED; /* MOUSE.ASM:77  speed_counter dd 6 */
     p->prev_x      = p->x;
+    p->explo_timer = 0;
 }
 
 /* --------------------------------------------------------------------------
