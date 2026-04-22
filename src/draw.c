@@ -633,6 +633,29 @@ static void draw_cannon_flash(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* Paddle telepod overlay — Blaster.inc:294-330 vaisseau_telepod_*.
+ * 10 frames stacked at stride 44; normal/small share the P1-row atlas
+ * block at y=877, large lives at y=1445. We use the red variant
+ * uniformly (ASM alternates red/green across the flicker, but the
+ * timing is fast enough that a single hue reads fine). */
+static void draw_paddle_telepod(DrawContext *dc, const Paddle *p) {
+    int x, base_y, w, sub_x;
+    switch (p->size) {
+        case PADDLE_SIZE_LARGE:
+            x =   1; base_y = 1445; w = 127; sub_x = 11; break;
+        case PADDLE_SIZE_SMALL:
+            x = 543; base_y =  877; w =  92; sub_x = 27; break;
+        default: /* NORMAL */
+            x = 357; base_y =  877; w =  92; sub_x =  9; break;
+    }
+    int frame = (PADDLE_TELEPOD_TICKS - p->telepod_timer) / PADDLE_TELEPOD_SPEED;
+    if (frame < 0) frame = 0;
+    if (frame > PADDLE_TELEPOD_FRAMES - 1) frame = PADDLE_TELEPOD_FRAMES - 1;
+    Rectangle src = { (float)x, (float)(base_y + frame * 44), (float)w, 43.0f };
+    Vector2 pos   = { (float)(p->x - sub_x), (float)(p->y - 9) };
+    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+}
+
 /* Paddle explosion overlay — Blaster.inc:254-282 vaisseau_explo_*.
  * 8 frames stacked vertically at stride 71, one column per size.
  * While explo_timer > 0 the paddle is replaced by the current frame. */
@@ -665,6 +688,7 @@ static void draw_paddle(DrawContext *dc, const Game *g) {
         Vector2 pos   = { (float)g->paddle.x, (float)g->paddle.y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
         draw_cannon_flash(dc, &g->paddle, 0);
+        if (g->paddle.telepod_timer > 0) draw_paddle_telepod(dc, &g->paddle);
     }
 
     /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68).
@@ -677,6 +701,7 @@ static void draw_paddle(DrawContext *dc, const Game *g) {
             Vector2 pos2   = { (float)g->paddle_2.x, (float)g->paddle_2.y };
             DrawTextureRec(dc->assets->sprite_sheet, src2, pos2, WHITE);
             draw_cannon_flash(dc, &g->paddle_2, 1);
+            if (g->paddle_2.telepod_timer > 0) draw_paddle_telepod(dc, &g->paddle_2);
         }
     }
 }

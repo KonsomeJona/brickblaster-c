@@ -1027,6 +1027,10 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
                 teleported = 1;
             }
             if (teleported && g->audio) audio_play(g->audio, SFX_TELEPOD);
+            /* MAIN.ASM:2420-2460 Init_Cursor_Telepod — the collecting
+             * paddle plays the vaisseau_telepod_* 10-frame animation
+             * while the balls are invisible mid-jump. */
+            owner_paddle->telepod_timer = PADDLE_TELEPOD_TICKS;
         }
         break;
 
@@ -1627,15 +1631,19 @@ void game_update(Game *g, const FrameInput *input) {
      * explosion on both paddles.  When a paddle's explo_timer reaches 0
      * and there's no ball in play yet, spawn the replacement (deferred
      * from handle_life_lost). */
-    Paddle *paddles_explo[2] = { &g->paddle, &g->paddle_2 };
+    Paddle *paddles_anim[2] = { &g->paddle, &g->paddle_2 };
     for (i = 0; i < 2; i++) {
-        if (paddles_explo[i]->explo_timer > 0) {
-            paddles_explo[i]->explo_timer--;
-            if (paddles_explo[i]->explo_timer == 0 &&
+        if (paddles_anim[i]->explo_timer > 0) {
+            paddles_anim[i]->explo_timer--;
+            if (paddles_anim[i]->explo_timer == 0 &&
                 g->state == STATE_READY_TO_PLAY_AGAIN &&
                 g->ball_count == 0) {
                 game_spawn_ball(g);
             }
+        }
+        /* MAIN.ASM:2420-2460 Init_Cursor_Telepod — telepod paddle anim. */
+        if (paddles_anim[i]->telepod_timer > 0) {
+            paddles_anim[i]->telepod_timer--;
         }
     }
 

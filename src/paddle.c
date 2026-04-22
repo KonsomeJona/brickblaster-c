@@ -40,6 +40,7 @@ void paddle_init(Paddle *p)
     p->speed       = PADDLE_SPEED; /* MOUSE.ASM:77  speed_counter dd 6 */
     p->prev_x      = p->x;
     p->explo_timer = 0;
+    p->telepod_timer = 0;
 }
 
 /* --------------------------------------------------------------------------

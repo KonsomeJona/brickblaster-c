@@ -77,11 +77,21 @@ typedef struct {
                          * paddle renders the explosion sprite and the
                          * ball respawn is deferred.  Frame index =
                          * 7 - (explo_timer - 1) / 4. */
+    int telepod_timer;  /* POWERUP_TELEPOD paddle animation countdown.
+                         * Blaster.inc:293-330 vaisseau_telepod_* —
+                         * 10 frames at speed 1 = 10 ticks. Stamps the
+                         * owner paddle when the powerup is collected;
+                         * draws the red-variant telepod sprite overlay
+                         * during the countdown. */
 } Paddle;
 
 #define PADDLE_EXPLO_FRAMES  8   /* Blaster.inc:257  vaisseau_explo_nbs_anim */
 #define PADDLE_EXPLO_SPEED   4   /* Blaster.inc:258  vaisseau_explo_speed    */
 #define PADDLE_EXPLO_TICKS   (PADDLE_EXPLO_FRAMES * PADDLE_EXPLO_SPEED)  /* 32 */
+
+#define PADDLE_TELEPOD_FRAMES 10 /* Blaster.inc:297  vaisseau_telepod_nbs_anim */
+#define PADDLE_TELEPOD_SPEED   1 /* Blaster.inc:298  vaisseau_telepod_speed */
+#define PADDLE_TELEPOD_TICKS   (PADDLE_TELEPOD_FRAMES * PADDLE_TELEPOD_SPEED)
 
 /* Initialise paddle at screen centre, PADDLE_Y, normal width.
  * MAIN.ASM:1735  mov cursor_1.sprite_pos_x,eax  (centred via (limite_x-bord_x)/2)
