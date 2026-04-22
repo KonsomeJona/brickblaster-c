@@ -9,6 +9,8 @@
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
+### ⬇️ [**Download the game here — Téléchargez le jeu ici**](https://github.com/KonsomeJona/brickblaster-c/releases/latest) — Windows / Linux / macOS
+
 > **Status: early preview, actively iterating.** The ASM-level internals
 > (gameplay constants, level format, XOR codec, power-up tables,
 > collision LUT) are ported byte-for-byte with ASM line citations. The
@@ -280,6 +282,7 @@ binary artefact, and GitHub release notes are generated from it.
 
 ## Links
 
+- C/raylib port binaries: [GitHub Releases](https://github.com/KonsomeJona/brickblaster-c/releases)
 - Upstream source + toolchain: [david4599/BrickBlaster](https://github.com/david4599/BrickBlaster)
 - Unmodified original + EOS archive: [david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)
 - French commercial release (1999): [archive.org](https://archive.org/details/brick-blaster-1999)
