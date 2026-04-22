@@ -350,7 +350,11 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->assets->menu_image, csrc, cx, cy, WHITE);
     }
 
-    /* 5. Text panel: menu title (top) + hovered button label (below icon). */
+    /* 5. Text: menu title stays pinned in the bottom bar, hovered-button
+     * label follows the cursor per MAIN.ASM:555-567 refresh_text:
+     *   panel_info.y = cursor.y + cursor_menu_size_y
+     *   panel_info.x = cursor.x - panel_menu_size_x/2 + cursor_menu_size_x/2
+     * which centers the label strip around the cursor column. */
     if (m->font_ready) {
         BitmapFont *font = &m->font;
 
@@ -359,11 +363,23 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
                           ? i18n(menu_label(menu, m->hover_button))
                           : "";
 
-        /* panel_info: label + title in the bottom bar.
-         * Blaster.inc: panel_menu_pos_y=446, panel_info_pos_y=446.
-         * Solid black strip ensures readability over the disc artwork. */
-        DrawRectangle(0, 440, SCREEN_W, 40, (Color){0, 0, 0, 255});
-        draw_centered_string(font, label, SCREEN_W / 2, 442, WHITE);
+        /* Bottom strip holds the (stationary) menu title. */
+        DrawRectangle(0, 458, SCREEN_W, 22, (Color){0, 0, 0, 255});
         draw_centered_string(font, title, SCREEN_W / 2, 464, WHITE);
+
+        /* Label trails the cursor, drawn over a short black backplate so
+         * it stays readable against the disc artwork.  Clamp X so the
+         * plate never runs off-screen. */
+        if (m->hover_button >= 0 && label && label[0]) {
+            int lw    = font_string_width(font, label);
+            int pad   = 6;
+            int plate_w = lw + pad * 2;
+            int plate_x = (int)m->cursor_x - plate_w / 2;
+            int plate_y = (int)m->cursor_y + CURSOR_H;
+            if (plate_x < 4) plate_x = 4;
+            if (plate_x + plate_w > SCREEN_W - 4) plate_x = SCREEN_W - 4 - plate_w;
+            DrawRectangle(plate_x, plate_y, plate_w, 18, (Color){0, 0, 0, 200});
+            draw_centered_string(font, label, plate_x + plate_w / 2, plate_y + 2, WHITE);
+        }
     }
 }
