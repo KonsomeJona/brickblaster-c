@@ -24,6 +24,91 @@ _nothing yet_
 
 ---
 
+## [0.1.5] — 2026-04-22
+
+### Added
+- **Paddle explosion animation on ball loss.** `MAIN.ASM:2353-2409
+  destroy_vaisseau` cycles `vaisseau_explo_*` (8 frames × speed 4 =
+  32 ticks) on the losing paddle before the ball respawns. Port was
+  skipping the animation entirely — losing a life had no visual
+  feedback beyond the life counter ticking down. Ball respawn is
+  deferred via the new `Paddle.explo_timer` until the animation
+  completes; fire input is a no-op during that window.
+- **Telepod paddle animation** on `POWERUP_TELEPOD` pickup. Plays
+  the 10-frame `vaisseau_telepod_*` sequence (`MAIN.ASM:2420-2460
+  Init_Cursor_Telepod`, `Blaster.inc:294-330`) on the collecting
+  paddle while the balls make their random jump.
+- **Cannon muzzle-flash** overlay while `gun_cooldown > 0`. Draws
+  the appropriate `vaisseau_tir*` / `vaisseau_tir_big*` sprite at
+  the cannon offset (`Blaster.inc:234-247`), alternating L/R based
+  on `paddle.gun_side` for mini shots.
+- **Credits intro animation** — the 36-frame `intro.flc` sequence
+  (pre-converted to `assets/intro/frame_0001..0036.png`) now plays
+  before the 6 credit letters, matching `MAIN.ASM:145-190 @@credit`.
+  Frames are lazy-loaded on first Credits entry so cold launch is
+  unaffected.
+- **In-pause audio toggles** — `M` flips music, `S` flips SFX. State
+  lines render above the PAUSED banner; both keys are excluded from
+  the generic "any key resumes" check so toggling doesn't leave
+  pause. Persists through the existing `blaster.usr` pipeline on
+  shutdown.
+- **ESC returns to main menu** from the `READY_TO_PLAY` and
+  `GAME_OVER` overlays (desktop UX convention — ASM only listened
+  for ESC on the main menu, the gameplay loop, and hiscore name
+  entry).
+- **Brick Blaster logo pinned** at the top of every menu
+  (`Blaster.inc:178-182 icon_logo_o` at `(0, 1103, 623, 114)` in
+  `MENU.png`). Port was only blitting the `Blaster.png` backdrop.
+- **Rounded hover ring** around the selected quadrant in menu 1-7,
+  mirroring the disc shape of the menu icon. Replaces the dark
+  pulsing rectangle that was a rough RGBA approximation of the ASM
+  palette pulse.
+- **README** now has a prominent bilingual "Download the game here —
+  Téléchargez le jeu ici" link near the top, plus a direct GitHub
+  Releases entry in the Links section.
+
+### Fixed
+- **HUD life counter was drawn from an empty atlas column.**
+  `panel_nbs_ball_1/2_o = (631, 0/9, 9, 9)` points to the 9-px ZERO-
+  life anchor slot; `MAIN.ASM:6056-6072 display_nbs_ball` grows ONE
+  wide sprite by 12 px per life toward the LEFT, pulling real ball
+  graphics from `X=619` down (stride 12). The port drew N
+  independent 9x9 sprites from `X=631` — all transparent. Fixed
+  the `SR_HUD_LIFE_P1/P2` coordinates to point at the rightmost
+  real ball cell.
+- **Projectile sprites** confused the paddle cannon recoil animation
+  (`vaisseau_tir*`, 12x18 / 13x19) with the actual flying bullet
+  (`shoot`, 8x42 at `(444, 339)` and `mini_shoot`, 3x13 at
+  `(85, 164)`, per `MAIN.ASM:1947-1990 Detect_Shoot`). Small
+  projectiles were rendering the whole cannon-with-muzzle frame,
+  making them look identical to big shoot. Now uses the correct
+  `shoot_o` / `mini_shoot_o` sprites, centered on the paddle-
+  relative spawn point the original decal math computed.
+- **Hiscore name entry ENTER key** appeared broken: the user could
+  type letters but ENTER did nothing. Root cause — the ENTER held
+  during `game_over` skip stayed held through the state transition,
+  and `IsKeyPressed()` only fires on rising edges. Added
+  `input_wait_click_release()` before the `STATE_HISCORE` transition
+  to drain any carried-over press, plus on-screen hints (`"type name
+  — enter to confirm — esc to cancel"`).
+- **Indestructible brick reflet animation** is now the hit-triggered
+  per-brick ripple the 1999 binary did (`MAIN.ASM:4058-4061` stamps,
+  `6220-6240` decrements), replacing the ambient whole-screen
+  flicker toggle david4599 reported as painful (2026-04-21).
+- **Menu hover label** now follows the cursor (`MAIN.ASM:555-567
+  refresh_text`), previously centered at `SCREEN_W/2` in the bottom
+  bar. Title stays pinned in a tighter 22-px bar beneath it.
+
+### Changed
+- Removed the pulsing black overlay on hovered menu quadrants.
+  Replaced with the rounded ring + cursor sprite + bottom-bar label
+  combination described above.
+- Internal refactor: factored out `draw_one_paddle()`,
+  `anim_frame_clamp()`, and named `SR_CANNON_*` rectangles so the
+  new paddle animations follow the existing `SR_*` convention.
+
+---
+
 ## [0.1.4] — 2026-04-21
 
 ### Added
