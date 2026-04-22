@@ -601,12 +601,45 @@ static void draw_balls(DrawContext *dc, const Game *g) {
  * Paddle size selects from three sprite variants at same Y row (42).
  * Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042) → Rect(0, 42, 74, 25)
  * ============================================================================ */
+/* Cannon recoil animation overlays (Blaster.inc:230-252).  Each set is
+ * a vertical column of frames with stride 37 for mini, 1 for big — we
+ * just show frame 0 while gun_cooldown is non-zero.  Enough to register
+ * the shot visually without porting the full 6/4-frame sequence. */
+static void draw_cannon_flash(DrawContext *dc, const Paddle *p, int p2) {
+    if (p->gun_cooldown <= 0 || !p->has_gun) return;
+    Rectangle src;
+    int ox, oy;
+    if (!p->mini_laser) {
+        /* Big shoot: single centered cannon (13x19). */
+        src = p2 ? (Rectangle){ 446, 435, 13, 19 }
+                 : (Rectangle){ 446, 413, 13, 19 };
+        ox = VAISSEAU_DECAL_X_B;
+        oy = VAISSEAU_DECAL_Y_B;
+    } else {
+        /* Mini shoot: alternating L/R cannon — gun_side reflects the
+         * LAST shot's side (game.c toggles before computing position). */
+        if (p->gun_side) {
+            src = p2 ? (Rectangle){ 402, 405, 12, 18 }
+                     : (Rectangle){ 402, 183, 12, 18 };
+            ox  = VAISSEAU_DECAL_X_R;
+        } else {
+            src = p2 ? (Rectangle){ 374, 405, 12, 18 }
+                     : (Rectangle){ 374, 183, 12, 18 };
+            ox  = VAISSEAU_DECAL_X_L;
+        }
+        oy = VAISSEAU_DECAL_Y_L;
+    }
+    Vector2 pos = { (float)(p->x + ox), (float)(p->y + oy) };
+    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+}
+
 static void draw_paddle(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
 
     Rectangle src = get_paddle_rect(&g->paddle, 0);
     Vector2 pos   = { (float)g->paddle.x, (float)g->paddle.y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+    draw_cannon_flash(dc, &g->paddle, 0);
 
     /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68).
      * No tint — the sprite itself is colour-coded per ASM (Blaster.inc:226). */
@@ -614,6 +647,7 @@ static void draw_paddle(DrawContext *dc, const Game *g) {
         Rectangle src2 = get_paddle_rect(&g->paddle_2, 1);
         Vector2 pos2   = { (float)g->paddle_2.x, (float)g->paddle_2.y };
         DrawTextureRec(dc->assets->sprite_sheet, src2, pos2, WHITE);
+        draw_cannon_flash(dc, &g->paddle_2, 1);
     }
 }
 
