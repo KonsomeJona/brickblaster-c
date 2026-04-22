@@ -339,10 +339,22 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->assets->menu_image, isrc, ICON_DST_X, ICON_DST_Y, WHITE);
     }
 
-    /* 3. Cursor (14x18) at the cursor position.
-     * Hover is indicated by the cursor sprite + the label text at the bottom
-     * — no darkening overlay (the palette-pulse approximation looked heavy
-     * against the disc artwork and isn't present in the ASM render path). */
+    /* 3. Rounded highlight ring around the hovered quadrant — mirrors the
+     * disc shape of the menu icon (each button occupies one quadrant of a
+     * circular plate). The ASM pulsed the icon palette; with RGBA assets
+     * we draw a thin ring instead. Subtle pulse keeps it alive visually. */
+    if (m->hover_button >= 0) {
+        Rectangle r = BTN_RECT[m->hover_button];
+        float cx = r.x + r.width  * 0.5f;
+        float cy = r.y + r.height * 0.5f;
+        float radius = (r.width < r.height ? r.width : r.height) * 0.5f - 4.0f;
+        float pulse = 0.5f + 0.5f * cosf((float)GetTime() * 4.0f);
+        unsigned char a = (unsigned char)(140.0f + 80.0f * pulse);
+        DrawCircleLines((int)cx, (int)cy, radius,      (Color){255, 255, 255, a});
+        DrawCircleLines((int)cx, (int)cy, radius - 1, (Color){255, 255, 255, a});
+    }
+
+    /* 4. Cursor (14x18) pointer sprite. */
     if (m->assets && m->assets->menu_image_loaded) {
         Rectangle csrc = { CURSOR_SRC_X, CURSOR_SRC_Y, CURSOR_W, CURSOR_H };
         float cx = m->cursor_x - CURSOR_W / 2.0f;
