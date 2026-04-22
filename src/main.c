@@ -585,6 +585,11 @@ static void UpdateDrawFrame(void) {
                     hiscore_screen.letter_values[_li] = 26;
                 state.hiscore_mode = hs_mode;
                 state.game_mode = STATE_HISCORE;
+                /* Drain any key still held from the game-over skip press —
+                 * without this, ENTER stays HELD into the hiscore screen and
+                 * IsKeyPressed(KEY_ENTER) only fires on the next release+press,
+                 * making the confirm button look broken. */
+                input_wait_click_release();
             } else {
                 state.game_mode = STATE_MENU;
             }

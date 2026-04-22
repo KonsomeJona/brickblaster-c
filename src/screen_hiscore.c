@@ -218,6 +218,16 @@ void hiscore_screen_draw(HiscoreScreenState *hs, Hiscores *scores, int mode) {
     /* 2. Title — FONTE (lowercase) */
     draw_str(220, 30, "high scores", WHITE);
 
+    /* Hint: during name entry, show the confirm/cancel bindings so the
+     * player isn't stuck wondering how to submit their score. */
+    if (hs->name_entry_active) {
+        draw_str(140, 440, "type name  -  enter to confirm  -  esc to cancel",
+                 (Color){200, 200, 200, 255});
+    } else {
+        draw_str(200, 440, "press any key to continue",
+                 (Color){200, 200, 200, 255});
+    }
+
     /* 3. Column headers */
     draw_str(COL_RANK,  ROW_START_Y - 26, "#", WHITE);
     draw_str(COL_SCORE, ROW_START_Y - 26, "score", WHITE);
