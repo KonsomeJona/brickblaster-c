@@ -1347,6 +1347,8 @@ static void tick_speed_counter(Game *g) {
             g->balls[i].speed_counter = g->speed_level * 3;
         }
         int apply = 0;
+        int natural_tick = 0;  /* MAIN.ASM:3407-3409 plays iff_speed_up only
+                                 * on the counter-expiry branch (not fast_ball). */
         /* MAIN.ASM:3390-3394 per-ball decrement gate. */
         if (g->balls[i].vy < 0) {
             /* If ctr is still 0 (never seeded) seed with speed_level*3 before
@@ -1356,10 +1358,15 @@ static void tick_speed_counter(Game *g) {
                 g->balls[i].speed_counter = g->speed_level * 3;
             }
             g->balls[i].speed_counter--;
-            if (g->balls[i].speed_counter <= 0) apply = 1;
+            if (g->balls[i].speed_counter <= 0) { apply = 1; natural_tick = 1; }
         }
         if (fast_pulse) apply = 1;
         if (!apply) continue;
+
+        /* MAIN.ASM:3407-3408 @@detect_inc_speed_option: play iff_speed_up
+         * when the natural timer expires. Fast-ball powerup pulses are
+         * silent (sound is on powerup pickup, not on every sub-frame tick). */
+        if (natural_tick && g->audio) audio_play(g->audio, SFX_SPEEDUP);
 
         /* MAIN.ASM:3398-3402 @@detect_inc_speed:
          *   mov eax,speed_level
