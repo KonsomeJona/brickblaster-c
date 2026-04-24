@@ -21,6 +21,22 @@
 #include "input_tilt.h"
 #endif
 
+#if defined(UWP_BUILD)
+/* Win32 GetCursorPos / ScreenToClient: drives pointer tracking even when
+ * the window has lost focus (system popups, touch keyboard, focus assist,
+ * tablet sleep — all kill GLFW's mouse_delta and would freeze the paddle
+ * for the rest of the session).
+ *
+ * Forward-declare the two Win32 entry points rather than include
+ * <windows.h>, which collides with raylib.h on ShowCursor, CloseWindow
+ * and Rectangle. Matches the Win32 ABI (x86/x64 stdcall). */
+#include <limits.h>
+typedef struct { long x, y; } POINT_W32;
+typedef void *HWND_W32;
+__declspec(dllimport) int __stdcall GetCursorPos(POINT_W32 *lpPoint);
+__declspec(dllimport) int __stdcall ScreenToClient(HWND_W32 hWnd, POINT_W32 *lpPoint);
+#endif
+
 /* Speed multiplier tables: index 0=VeryLow, 1=Low, 2=Med, 3=High, 4=VeryHigh */
 static const float s_btn_speed[] = { 0.6f, 1.0f, 1.4f, 2.0f, 2.8f };
 static const float s_tilt_speed[] = { 0.4f, 0.8f, 1.5f, 2.5f, 3.5f };
@@ -139,19 +155,49 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     if (in_game && out->click_pressed)
         out->fire_pressed = 1;
 
-    /* Pointer: touch first, then mouse delta */
+    /* Pointer: touch first, then mouse/stylus position. */
     if (touch_count > 0) {
         Vector2 tp = GetTouchPosition(0);
         Vector2 cp = letterbox_screen_to_canvas(tp);
         out->pointer_active = 1;
         out->pointer_game_x = cp.x;
     } else {
+#if defined(UWP_BUILD)
+        /* Read the OS cursor directly via Win32 — works even when our
+         * window has lost focus (notifications, touch keyboard, etc.).
+         * raylib's GetMouseDelta only fires on movement events delivered
+         * to a focused window; once focus is lost the paddle freezes for
+         * the rest of the session. We track our own previous cursor pos
+         * so pointer_active still acts as an edge ("pointer moved this
+         * frame") and doesn't override keyboard input when the cursor is
+         * stationary inside the window. */
+        static int prev_cx = INT_MIN, prev_cy = INT_MIN;
+        POINT_W32 pt;
+        if (GetCursorPos(&pt)) {
+            HWND_W32 hwnd = (HWND_W32)GetWindowHandle();
+            if (hwnd && ScreenToClient(hwnd, &pt)) {
+                int win_w = GetScreenWidth();
+                int win_h = GetScreenHeight();
+                if (pt.x >= 0 && pt.x < win_w && pt.y >= 0 && pt.y < win_h) {
+                    if (pt.x != prev_cx || pt.y != prev_cy) {
+                        Vector2 mp = { (float)pt.x, (float)pt.y };
+                        Vector2 cp = letterbox_screen_to_canvas(mp);
+                        out->pointer_active = 1;
+                        out->pointer_game_x = cp.x;
+                    }
+                    prev_cx = pt.x;
+                    prev_cy = pt.y;
+                }
+            }
+        }
+#else
         if (mouse_delta.x != 0.0f || mouse_delta.y != 0.0f) {
             Vector2 mp = { (float)GetMouseX(), (float)GetMouseY() };
             Vector2 cp = letterbox_screen_to_canvas(mp);
             out->pointer_active = 1;
             out->pointer_game_x = cp.x;
         }
+#endif
     }
 #endif
 
