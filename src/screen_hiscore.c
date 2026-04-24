@@ -216,15 +216,17 @@ void hiscore_screen_draw(HiscoreScreenState *hs, Hiscores *scores, int mode) {
     DrawRectangle(0, 0, SCREEN_W, SCREEN_H, (Color){0, 0, 0, 180});
 
     /* 2. Title — FONTE (lowercase) */
-    draw_str(220, 30, "high scores", WHITE);
+    draw_str(220, 4, "high scores", WHITE);
 
     /* Hint: during name entry, show the confirm/cancel bindings so the
-     * player isn't stuck wondering how to submit their score. */
+     * player isn't stuck wondering how to submit their score. Drawn at
+     * y=30 just under the title — the old y=440 position overlapped row
+     * 14 (which ends at ~466 with 26-px row height and 22-px FONTE). */
     if (hs->name_entry_active) {
-        draw_str(140, 440, "type name  -  enter to confirm  -  esc to cancel",
+        draw_str(50, 30, "type name  -  enter to confirm  -  esc to cancel",
                  (Color){200, 200, 200, 255});
     } else {
-        draw_str(200, 440, "press any key to continue",
+        draw_str(200, 30, "press any key to continue",
                  (Color){200, 200, 200, 255});
     }
 
