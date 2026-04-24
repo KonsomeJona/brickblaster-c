@@ -20,6 +20,7 @@
     #include "mobile_controls.h"
 #endif
 #include "input_gamepad.h"
+#include "letterbox.h"
 
 static BitmapFont s_font;
 static int s_font_ready = 0;
@@ -32,6 +33,29 @@ static int s_font_ready = 0;
 #define LETTER_W     15
 #define ROW_H        26
 #define ROW_START_Y  80
+
+/* Touch name-entry button bar (canvas coords). Five buttons centred at
+ * the bottom of the canvas, shown only while name_entry_active. Covers
+ * pen/tablet users who have no physical keyboard or gamepad.
+ *   ◀ prev slot  ▶ next slot  ▲ prev letter  ▼ next letter  ✓ confirm
+ * The player can also tap a name slot directly to focus it. */
+#define NE_BTN_Y    452
+#define NE_BTN_H     24
+#define NE_BTN_W     50
+#define NE_BTN_GAP   10
+#define NE_BTN_COUNT  5
+#define NE_BAR_W    (NE_BTN_COUNT * NE_BTN_W + (NE_BTN_COUNT - 1) * NE_BTN_GAP)
+#define NE_BTN_X0   ((640 - NE_BAR_W) / 2)
+
+enum { NE_BTN_PREV_SLOT, NE_BTN_NEXT_SLOT,
+       NE_BTN_PREV_LETTER, NE_BTN_NEXT_LETTER,
+       NE_BTN_OK };
+
+/* Forward decls — hit-test helpers are defined below but used in the
+ * update() function that precedes them. */
+static Rectangle ne_btn_rect(int idx);
+static Rectangle ne_slot_rect(int slot_idx, int entry_row_y);
+static int pt_in_rect(float x, float y, Rectangle r);
 
 /* Name input length matches the ASM field: name_size = 15 (HISCORE.ASM:477). */
 #define INPUT_NAME_LEN  HISCORE_NAME_LEN
@@ -149,6 +173,47 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
     int do_confirm = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)
                   || IsKeyPressed(KEY_ESCAPE) || gamepad_confirm();
 
+    /* Touch / pen / mouse tap handling for pen+tablet users (Windows
+     * Surface etc.) who have no keyboard or gamepad. Five buttons at the
+     * bottom of the canvas (prev/next slot, prev/next letter, OK) plus
+     * direct tap on any name slot to focus it. */
+    if (input->click_pressed) {
+        Vector2 cp = letterbox_screen_to_canvas((Vector2){ input->click_screen_x,
+                                                           input->click_screen_y });
+        int entry_row_y = ROW_START_Y + hs->entry_rank * ROW_H;
+        /* Tap on a letter slot → select that position. */
+        for (int si = 0; si < INPUT_NAME_LEN; si++) {
+            if (pt_in_rect(cp.x, cp.y, ne_slot_rect(si, entry_row_y))) {
+                hs->name_entry_pos = si;
+                break;
+            }
+        }
+        /* Tap on a button → same effect as its keyboard equivalent. */
+        for (int bi = 0; bi < NE_BTN_COUNT; bi++) {
+            if (!pt_in_rect(cp.x, cp.y, ne_btn_rect(bi))) continue;
+            switch (bi) {
+                case NE_BTN_PREV_SLOT:
+                    if (hs->name_entry_pos > 0) hs->name_entry_pos--;
+                    break;
+                case NE_BTN_NEXT_SLOT:
+                    if (hs->name_entry_pos < INPUT_NAME_LEN - 1) hs->name_entry_pos++;
+                    break;
+                case NE_BTN_PREV_LETTER:
+                    hs->letter_values[hs->name_entry_pos] =
+                        (hs->letter_values[hs->name_entry_pos] + 36) % 37;
+                    break;
+                case NE_BTN_NEXT_LETTER:
+                    hs->letter_values[hs->name_entry_pos] =
+                        (hs->letter_values[hs->name_entry_pos] + 1) % 37;
+                    break;
+                case NE_BTN_OK:
+                    do_confirm = 1;
+                    break;
+            }
+            break;
+        }
+    }
+
 #if defined(PLATFORM_ANDROID)
 #if defined(BRICKBLASTER_MOBILE)
     if (mobile_left_pressed())
@@ -202,6 +267,22 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
 static void draw_str(int x, int y, const char *s, Color tint) {
     if (s_font_ready)
         font_draw_string(&s_font, s, x, y, tint);
+}
+
+/* Canvas-space rect of touch button idx (0..4). */
+static Rectangle ne_btn_rect(int idx) {
+    int x = NE_BTN_X0 + idx * (NE_BTN_W + NE_BTN_GAP);
+    return (Rectangle){ (float)x, (float)NE_BTN_Y, (float)NE_BTN_W, (float)NE_BTN_H };
+}
+
+/* Canvas-space rect of a single name-slot at slot_idx on the entry row. */
+static Rectangle ne_slot_rect(int slot_idx, int entry_row_y) {
+    return (Rectangle){ (float)(COL_NAME + slot_idx * LETTER_W), (float)(entry_row_y - 2),
+                        (float)LETTER_W, (float)(FONT_CHAR_H + 4) };
+}
+
+static int pt_in_rect(float x, float y, Rectangle r) {
+    return (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
 }
 
 /* HISCORE.ASM:195 - print_score — all rendered with FONTE. */
@@ -294,6 +375,21 @@ void hiscore_screen_draw(HiscoreScreenState *hs, Hiscores *scores, int mode) {
             for (int k = 0; name[k]; k++)
                 if (name[k] >= 'A' && name[k] <= 'Z') name[k] += 32;
             draw_str(COL_NAME, y, name, WHITE);
+        }
+    }
+
+    /* 5. Touch button bar (only during name entry). */
+    if (hs->name_entry_active) {
+        static const char *labels[NE_BTN_COUNT] = { "<<", ">>", "-", "+", "OK" };
+        for (int bi = 0; bi < NE_BTN_COUNT; bi++) {
+            Rectangle r = ne_btn_rect(bi);
+            DrawRectangleRec(r, (Color){ 0, 0, 0, 180 });
+            DrawRectangleLinesEx(r, 1.0f, (Color){ 220, 220, 255, 200 });
+            const char *lab = labels[bi];
+            int fs = 16;
+            int tw = MeasureText(lab, fs);
+            DrawText(lab, (int)r.x + ((int)r.width - tw) / 2,
+                     (int)r.y + ((int)r.height - fs) / 2 - 1, fs, WHITE);
         }
     }
 }
