@@ -199,6 +199,27 @@ static void UpdateDrawFrame(void) {
         frame_input_poll(&fi, state.drag_enabled, state.tilt_enabled,
                          state.button_speed, state.tilt_speed,
                          0, in_game);
+
+#if defined(UWP_BUILD)
+        /* DIAGNOSTIC: every 60 frames during PLAYING, dump input + paddle
+         * state so the "paddle freezes after ~5 min" bug can be diagnosed.
+         * Remove once tracked down. */
+        if (game_initialized && state.game_mode == STATE_PLAYING
+            && (game.frame % 60) == 0) {
+            FILE *_pd = fopen("D:\\brickblaster-paddle.log", "a");
+            if (_pd) {
+                fprintf(_pd,
+                    "f=%d s=%d demo=%d padx=%d ptract=%d ptrx=%.1f "
+                    "mL=%d mR=%d stk=%.2f rev=%d sz_tmr=%d demo_tmr=%d\n",
+                    game.frame, game.state, game.demo_active,
+                    game.paddle.x, fi.pointer_active, (double)fi.pointer_game_x,
+                    fi.move_left, fi.move_right, (double)fi.stick_x,
+                    game.paddle.reversed, game.paddle.size_timer,
+                    game.demo_timer);
+                fclose(_pd);
+            }
+        }
+#endif
         /* Poll P2 input when multiplayer active. */
         if (state.nbs_player > 1) {
             frame_input_poll_p2(&fi, state.control_p2);
