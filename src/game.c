@@ -2568,7 +2568,16 @@ void game_update(Game *g, const FrameInput *input) {
         int active_count = 0;
         any_alive = 0;
         for (i = 0; i < g->ball_count; i++) {
-            if (g->balls[i].active) { any_alive = 1; active_count++; }
+            if (!g->balls[i].active) continue;
+            /* Demo mode: ignore ghost/bubble balls when deciding whether
+             * any ball is still in play. A ghost ball can end up outside
+             * the paddle's X range in the bottom strip and fail to trigger
+             * either the on-paddle destruction or ball_lost for many
+             * frames, freezing the attract demo. Normal play still
+             * counts ghosts as alive. */
+            if (g->demo_active && g->balls[i].is_ghost) continue;
+            any_alive = 1;
+            active_count++;
         }
         /* P1-ASM-9: MAIN.ASM:4623-4629 detect_game_over_player_1
          *   test_game_over fires when nbs_ball_in_play == 0, OR when
