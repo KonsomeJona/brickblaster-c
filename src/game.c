@@ -24,6 +24,29 @@
 
 #include "raylib.h"    /* TraceLog */
 
+/* --------------------------------------------------------------------------
+ * Ball-spawn diagnostic log
+ *
+ * Writes one line per ball-spawn site to D:\brickblaster-spawn.log on
+ * Windows, so we can correlate "extra ball on paddle rebound" sightings
+ * with the actual spawn reason (powerup collection, ghost, demo respawn,
+ * defensive re-init). Compiled into UWP builds only.
+ *
+ * Remove or wrap in another flag once the bug is identified.
+ * -------------------------------------------------------------------------- */
+#if defined(UWP_BUILD)
+#define SPAWN_LOG(g, fmt, ...) do {                                          \
+    FILE *_f = fopen("D:\\brickblaster-spawn.log", "a");                     \
+    if (_f) {                                                                \
+        fprintf(_f, "[f=%d gstate=%d bc=%d] " fmt "\n",                      \
+                (g)->frame, (g)->state, (g)->ball_count, ##__VA_ARGS__);     \
+        fclose(_f);                                                          \
+    }                                                                        \
+} while (0)
+#else
+#define SPAWN_LOG(g, fmt, ...) ((void)0)
+#endif
+
 /* Forward declarations for static helpers used before their definitions */
 static int compute_speed_level(int level_num);
 static PowerupType dev_next_powerup(Game *g);
@@ -582,6 +605,8 @@ void game_spawn_ball(Game *g) {
         g->balls[1].owner = 1;   /* P2 */
         g->ball_count = 2;
     }
+    SPAWN_LOG(g, "game_spawn_ball: level=%d game_mode=%d -> bc=%d",
+              g->level_num, g->game_mode, g->ball_count);
 
     /* Bug #5: Do NOT set g->state here.  Callers set the appropriate state:
      *   - STATE_READY_TO_PLAY      for first spawn (game_init / level advance)
@@ -694,6 +719,7 @@ static void deactivate_current_option(Game *g) {
 static void spawn_extra_balls(Game *g, int count, int owner) {
     int vx, vy;
     Paddle *owner_paddle = (g->game_mode > 0 && owner == 1) ? &g->paddle_2 : &g->paddle;
+    int _bc_before = g->ball_count;
 
     /* Iter 2 fix #8: MAIN.ASM:1567-1583 add_ball reuses inactive slots FIRST,
      * only appending to the end when no gap is available. Scan [0, ball_count)
@@ -702,6 +728,8 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
      * (vx offset) remains identical to before. */
     int spawned = 0;
     int batch_idx = 0;
+    int reused = 0;
+    int appended = 0;
 
     /* Pass 1: reuse gaps */
     for (int slot = 0; slot < g->ball_count && spawned < count; slot++) {
@@ -717,6 +745,7 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
         g->balls[slot].owner = owner;
         spawned++;
         batch_idx++;
+        reused++;
     }
 
     /* Pass 2: append until count reached or array is full */
@@ -735,7 +764,10 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
         g->ball_count++;
         spawned++;
         batch_idx++;
+        appended++;
     }
+    SPAWN_LOG(g, "spawn_extra: requested=%d owner=%d reused=%d appended=%d lost=%d bc %d->%d",
+              count, owner, reused, appended, (count - spawned), _bc_before, g->ball_count);
 }
 
 /* --------------------------------------------------------------------------
@@ -938,7 +970,10 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
             int ghost_count = (g->game_mode > 0) ? 10 : 20;  /* MAIN.ASM:6779-6783 */
             int start = g->ball_count;
             int end = start + ghost_count;
-            if (end > BALL_MAX + 1) end = BALL_MAX + 1;
+            int _capped = 0;
+            if (end > BALL_MAX + 1) { end = BALL_MAX + 1; _capped = 1; }
+            SPAWN_LOG(g, "ghost: requested=%d owner=%d start=%d end=%d capped=%d",
+                      ghost_count, collected_by, start, end, _capped);
             for (i = start; i < end; i++) {
                 int vx, vy;
                 ball_init(&g->balls[i],
@@ -1836,6 +1871,7 @@ void game_update(Game *g, const FrameInput *input) {
             ball_init(&g->balls[0], bx, by);
             g->balls[0].is_magnetic = 1;
             g->ball_count = 1;
+            SPAWN_LOG(g, "ready_reinit: defensive respawn slot 0");
         }
         /* Pin each un-launched ball to ITS OWNER'S paddle (P1 → paddle,
          * P2 → paddle_2). Iter 2 fix #1: mirrors detect_start_game in
@@ -2547,6 +2583,7 @@ void game_update(Game *g, const FrameInput *input) {
                 /* Demo: respawn immediately — no life lost.
                  * MAIN.ASM:2761-2771  @@demo ball init (fixed velocity). */
                 demo_handle_ball_lost(g);
+                SPAWN_LOG(g, "demo_handle_ball_lost: respawned slot 0");
             } else {
                 /* Normal play: MAIN.ASM:4595-4712  test_game_over */
                 handle_life_lost(g);
