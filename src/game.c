@@ -2097,6 +2097,31 @@ void game_update(Game *g, const FrameInput *input) {
 #endif
         }
 
+        /* Ghost ball: explode on paddle contact — MUST run BEFORE the
+         * paddle-bounce block below, because collision_paddle flips vy
+         * from + to -, which would cause the later `vy > 0` check to
+         * miss and the ghost would bounce like a regular ball, leaving
+         * the attract demo stuck on an immortal ghost.
+         * MAIN.ASM:4208-4209  cmp sprite_ghost,On → @@end_ghost. */
+        if (g->balls[i].is_ghost && g->balls[i].vy > 0) {
+            int bx = g->balls[i].x, by = g->balls[i].y;
+            /* P1 paddle */
+            if (by + BALL_H >= g->paddle.y
+                && bx + BALL_W > g->paddle.x
+                && bx < g->paddle.x + g->paddle.w) {
+                g->balls[i].active = 0;
+                continue;
+            }
+            /* P2 paddle in coop/duel */
+            if (g->game_mode > 0
+                && by + BALL_H >= g->paddle_2.y
+                && bx + BALL_W > g->paddle_2.x
+                && bx < g->paddle_2.x + g->paddle_2.w) {
+                g->balls[i].active = 0;
+                continue;
+            }
+        }
+
         /* Paddle collision.
          * MAIN.ASM  detect_colision_cursor:4152
          *
@@ -2147,20 +2172,6 @@ void game_update(Game *g, const FrameInput *input) {
             if (vy_before > 0 && g->balls[i].vy <= 0)
                 platform_vibrate(15);
 #endif
-        }
-
-        /* Ghost ball: explode on paddle contact.
-         * MAIN.ASM:4208-4209  cmp sprite_ghost,On → @@end_ghost (break anim + delete).
-         * Only destroy ghost ball when it's FALLING DOWN (vy > 0) and reaches paddle.
-         * Ghost balls spawn from paddle moving upward (vy < 0) — must not kill them
-         * immediately on spawn. They must fly up, hit bricks, then if they return
-         * to paddle level while falling, they explode. */
-        if (g->balls[i].is_ghost && g->balls[i].vy > 0
-            && g->balls[i].y + BALL_H >= g->paddle.y
-            && g->balls[i].x + BALL_W > g->paddle.x
-            && g->balls[i].x < g->paddle.x + g->paddle.w) {
-            g->balls[i].active = 0;
-            continue;
         }
 
         /* Brick collision with trajectory interpolation.
