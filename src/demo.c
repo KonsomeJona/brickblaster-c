@@ -49,14 +49,20 @@ void demo_update_paddle(Game *g) {
      * MAIN.ASM:5136  cmp demo_flag,On jne @@ok */
     if (!g->demo_active) return;
 
-    /* Find first active ball — MAIN.ASM uses ball_1 (slot 0).
-     * MAIN.ASM:5138  mov eax,ball_1.sprite_pos_x */
+    /* Find first active NON-GHOST ball owned by P1, falling back to any
+     * non-ghost active ball. Ghosts can get stuck against walls without
+     * dying (they only explode on brick contact or paddle contact while
+     * descending), and a stuck ghost would peg the paddle to the edge
+     * for the rest of the demo round. MAIN.ASM:5138 uses ball_1 (slot 0)
+     * which is always the original normal ball. */
+    Ball *fallback = NULL;
     for (i = 0; i < g->ball_count; i++) {
-        if (g->balls[i].active && !g->balls[i].is_magnetic) {
-            active_ball = &g->balls[i];
-            break;
-        }
+        Ball *b = &g->balls[i];
+        if (!b->active || b->is_magnetic || b->is_ghost) continue;
+        if (b->owner == 0) { active_ball = b; break; }
+        if (!fallback) fallback = b;
     }
+    if (!active_ball) active_ball = fallback;
 
     if (!active_ball) return;  /* no active ball to track */
 
@@ -171,13 +177,15 @@ void demo_ai_player_2(const Game *g, FrameInput *out) {
     out->p2_stick_x = 0.0f;
     out->p2_fire    = 0;
 
-    /* Find best ball to track: prefer owner==1 (P2), fallback to any active. */
+    /* Find best ball to track: prefer owner==1 (P2), fallback to any active.
+     * Skip ghosts — they can get stuck against walls and would freeze the
+     * paddle on the edge for the rest of the round. */
     const Ball *target = NULL;
     const Ball *fallback = NULL;
     int has_p2_magnetic = 0;
     for (int i = 0; i < g->ball_count; i++) {
         const Ball *b = &g->balls[i];
-        if (!b->active) continue;
+        if (!b->active || b->is_ghost) continue;
         if (b->is_magnetic) {
             if (b->owner == 1) has_p2_magnetic = 1;
             continue;  /* magnetic ball is on a paddle — don't track it */
