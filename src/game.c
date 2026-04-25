@@ -1125,7 +1125,13 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * All other handlers either leave it set (timed) or write Off themselves
      * (instant — MAIN.ASM:6352/6367/6382/...), but the initial write here
      * drives the HUD update that iter 2 was missing for instant powerups. */
-    if (type != POWERUP_MAGNETIC) {
+    /* NIGHT case (line 1041) intentionally sets current_option=POWERUP_COUNT
+     * to mirror MAIN.ASM:6659 (option_night_p writes current_option=Off).
+     * If we override it back to POWERUP_NIGHT here, detect_init_palette
+     * (tick_option_timer line 1184) immediately clears night_active on the
+     * next frame because it sees current_option != POWERUP_COUNT.
+     * Excluding NIGHT here preserves the ASM-faithful Off state. */
+    if (type != POWERUP_MAGNETIC && type != POWERUP_NIGHT) {
         g->current_option = type;
         g->current_option_count = DELAI_OPTION;
     }
@@ -1541,9 +1547,14 @@ static int projectile_hit_brick(Game *g, Projectile *p)
     /* Big shoot (POWERUP_SHOOT): penetrates all breakable bricks, travels to top.
      * MAIN.ASM refresh_shoot — big projectile is a laser beam through the brick column.
      * Only stops at BRICK_INDESTRUCTIBLE walls.
-     * Mini shoot (POWERUP_MINI_SHOOT): consumed on first solid brick hit. */
+     * Mini shoot (POWERUP_MINI_SHOOT): consumed on first solid brick hit, but
+     * transparent bricks are pass-through (matches ball behaviour and the ASM
+     * collision rule for transparent cells). */
     if (p->is_big && b->type != BRICK_INDESTRUCTIBLE) {
         return 0;   /* projectile survives, keeps moving up */
+    }
+    if (!p->is_big && b->type == BRICK_TRANSPARENT) {
+        return 0;   /* mini projectile passes through transparents */
     }
     p->active = 0;
     return 1;
