@@ -178,15 +178,27 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
             if (hwnd && ScreenToClient(hwnd, &pt)) {
                 int win_w = GetScreenWidth();
                 int win_h = GetScreenHeight();
-                if (pt.x >= 0 && pt.x < win_w && pt.y >= 0 && pt.y < win_h) {
-                    if (pt.x != prev_cx || pt.y != prev_cy) {
-                        Vector2 mp = { (float)pt.x, (float)pt.y };
+                /* Clamp to window range instead of rejecting out-of-bounds:
+                 * if the user overshoots the cursor past the window edge while
+                 * driving the paddle to the side, the paddle should stay pegged
+                 * to that edge instead of freezing at its last known position
+                 * (which was the bug — pushing cursor past the right window
+                 * edge left the paddle stuck at max_x for the rest of the
+                 * cursor excursion). The Y guard keeps the cursor "near" the
+                 * window vertically so a wildly off-screen cursor (e.g. on a
+                 * different monitor) doesn't drive the paddle. */
+                int cx = (int)pt.x, cy = (int)pt.y;
+                if (cx < 0)       cx = 0;
+                if (cx >= win_w)  cx = win_w - 1;
+                if (cy >= -win_h && cy < 2 * win_h) {
+                    if (cx != prev_cx || cy != prev_cy) {
+                        Vector2 mp = { (float)cx, (float)cy };
                         Vector2 cp = letterbox_screen_to_canvas(mp);
                         out->pointer_active = 1;
                         out->pointer_game_x = cp.x;
                     }
-                    prev_cx = pt.x;
-                    prev_cy = pt.y;
+                    prev_cx = cx;
+                    prev_cy = cy;
                 }
             }
         }
