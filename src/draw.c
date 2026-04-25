@@ -692,25 +692,34 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
-/* KITT-style scanner overlay over the 3 red lights baked into the
- * normal-size paddle sprite. The original DOS sprite has 3 dots at
- * relative (x={23,36,50}, y=16) — the centre is already red, the sides
- * are dark. We light up one at a time in a L → C → R → C bounce so the
- * paddle looks alive (port enhancement, not present in the ASM). */
-static void draw_paddle_lights(int paddle_x, int paddle_y, int paddle_w) {
-    if (paddle_w != 74) return;  /* only normal-size paddle has 3 dots */
-    static const int LIGHT_X[3] = { 23, 36, 50 };
-    static const int LIGHT_Y    = 16;
-    static const int CYCLE[4]   = { 0, 1, 2, 1 };  /* KITT bounce */
+/* KITT-style scanner over the 3 LED slots baked into the normal-size
+ * paddle sprite. The original DOS sprite has them at relative (x=29,
+ * 37, 45 / y=17) — centre is red, sides are dark. We re-blit two 5x5
+ * patches cropped from the sheet itself (the centre red LED for "lit"
+ * and the left dark LED for "off") so the animation is pixel-perfect:
+ * - ON  source: SPRITE.png(35..39, 57..61) — centre red bulb + bg
+ * - OFF source: SPRITE.png(27..31, 57..61) — left dark dot + bg
+ * Each step shows OFF on the centre slot (since the sprite's red bulb
+ * is baked there) and ON on the active slot. Port enhancement; the
+ * ASM treated the paddle as a single static sprite. */
+static const Rectangle SR_LED_ON  = { 35.0f, 57.0f, 5.0f, 5.0f };
+static const Rectangle SR_LED_OFF = { 27.0f, 57.0f, 5.0f, 5.0f };
+static const int LED_REL_X[3]     = { 27, 35, 43 };  /* top-left of each 5x5 patch on the paddle */
+static const int LED_REL_Y        = 15;
 
-    int phase = ((int)(GetTime() * 7.0)) % 4;      /* ~7 steps/sec */
+static void draw_paddle_lights(Texture2D sheet, int paddle_x, int paddle_y, int paddle_w) {
+    if (paddle_w != 74) return;  /* only normal paddle has 3 LEDs */
+    static const int CYCLE[4] = { 0, 1, 2, 1 };       /* KITT bounce */
+    int phase = ((int)(GetTime() * 4.0)) % 4;          /* 4 steps/sec, full cycle 1 s */
     int lit   = CYCLE[phase];
-    int lx    = paddle_x + LIGHT_X[lit];
-    int ly    = paddle_y + LIGHT_Y;
 
-    /* Soft outer glow (transparent) + bright core. */
-    DrawCircle(lx, ly, 5, (Color){ 255,   0,   0,  60 });
-    DrawCircle(lx, ly, 3, (Color){ 255, 100, 100, 230 });
+    /* Blot out the baked-in red centre with the OFF patch every frame, then
+     * stamp the ON patch on whichever slot is currently lit. */
+    Vector2 centre = { (float)(paddle_x + LED_REL_X[1]), (float)(paddle_y + LED_REL_Y) };
+    DrawTextureRec(sheet, SR_LED_OFF, centre, WHITE);
+
+    Vector2 active = { (float)(paddle_x + LED_REL_X[lit]), (float)(paddle_y + LED_REL_Y) };
+    DrawTextureRec(sheet, SR_LED_ON, active, WHITE);
 }
 
 /* Draw a single paddle with all overlays — exploded sprite while
@@ -724,7 +733,7 @@ static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
     Rectangle src = get_paddle_rect(p, p2);
     Vector2 pos   = { (float)p->x, (float)p->y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-    draw_paddle_lights(p->x, p->y, (int)src.width);
+    draw_paddle_lights(dc->assets->sprite_sheet, p->x, p->y, (int)src.width);
     draw_cannon_flash(dc, p, p2);
     if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
 }
