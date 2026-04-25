@@ -692,6 +692,27 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* KITT-style scanner overlay over the 3 red lights baked into the
+ * normal-size paddle sprite. The original DOS sprite has 3 dots at
+ * relative (x={23,36,50}, y=16) — the centre is already red, the sides
+ * are dark. We light up one at a time in a L → C → R → C bounce so the
+ * paddle looks alive (port enhancement, not present in the ASM). */
+static void draw_paddle_lights(int paddle_x, int paddle_y, int paddle_w) {
+    if (paddle_w != 74) return;  /* only normal-size paddle has 3 dots */
+    static const int LIGHT_X[3] = { 23, 36, 50 };
+    static const int LIGHT_Y    = 16;
+    static const int CYCLE[4]   = { 0, 1, 2, 1 };  /* KITT bounce */
+
+    int phase = ((int)(GetTime() * 7.0)) % 4;      /* ~7 steps/sec */
+    int lit   = CYCLE[phase];
+    int lx    = paddle_x + LIGHT_X[lit];
+    int ly    = paddle_y + LIGHT_Y;
+
+    /* Soft outer glow (transparent) + bright core. */
+    DrawCircle(lx, ly, 5, (Color){ 255,   0,   0,  60 });
+    DrawCircle(lx, ly, 3, (Color){ 255, 100, 100, 230 });
+}
+
 /* Draw a single paddle with all overlays — exploded sprite while
  * explo_timer is counting, otherwise normal paddle + cannon flash +
  * optional telepod overlay on top. */
@@ -703,6 +724,7 @@ static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
     Rectangle src = get_paddle_rect(p, p2);
     Vector2 pos   = { (float)p->x, (float)p->y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+    draw_paddle_lights(p->x, p->y, (int)src.width);
     draw_cannon_flash(dc, p, p2);
     if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
 }
