@@ -2549,6 +2549,9 @@ void game_update(Game *g, const FrameInput *input) {
             platform_vibrate(25);
 #endif
             if (!g->demo_active) {
+                SPAWN_LOG(g, "powerup_collected: type=%d by=%d at x=%d y=%d",
+                          g->powerups[i].type, collected_by,
+                          g->powerups[i].x, g->powerups[i].y);
                 apply_powerup(g, g->powerups[i].type, collected_by);
                 /* MAIN.ASM:5710-5716 detect_prise_option: mov ecx,2; call inc_score
                  * → +20 base, +difficulty bonus, x2 in night mode. */
