@@ -2600,10 +2600,20 @@ void game_update(Game *g, const FrameInput *input) {
                 && (g->p1_ball_lost_pending || g->p2_ball_lost_pending));
         if (trigger_life_lost) {
             if (g->demo_active) {
+                /* DEBUG: dump every active/inactive ball before respawn so we
+                 * can see why any_alive=0 (fires repeatedly in demo). */
+                SPAWN_LOG(g, "trigger_life_lost: bc=%d active=%d", g->ball_count, active_count);
+                for (int _bi = 0; _bi < g->ball_count; _bi++) {
+                    SPAWN_LOG(g, "  ball[%d]: active=%d ghost=%d magn=%d x=%d y=%d vx=%d vy=%d",
+                              _bi, g->balls[_bi].active, g->balls[_bi].is_ghost,
+                              g->balls[_bi].is_magnetic, g->balls[_bi].x, g->balls[_bi].y,
+                              g->balls[_bi].vx, g->balls[_bi].vy);
+                }
                 /* Demo: respawn immediately — no life lost.
                  * MAIN.ASM:2761-2771  @@demo ball init (fixed velocity). */
                 demo_handle_ball_lost(g);
-                SPAWN_LOG(g, "demo_handle_ball_lost: respawned slot 0");
+                SPAWN_LOG(g, "demo_handle_ball_lost: respawned slot 0 padx=%d pady=%d",
+                          g->paddle.x, g->paddle.y);
             } else {
                 /* Normal play: MAIN.ASM:4595-4712  test_game_over */
                 handle_life_lost(g);
