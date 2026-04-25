@@ -1538,6 +1538,8 @@ static int projectile_hit_brick(Game *g, Projectile *p)
                 powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
                 /* F5 P1-ASM-35: tag with destroyer's owner (projectile path). */
                 g->powerups[g->powerup_count].owner = p->owner;
+                SPAWN_LOG(g, "powerup_spawn(proj): type=%d at x=%d y=%d (brick %d)",
+                          pt, bx, by, idx);
                 g->powerup_count++;
                 g->option_spawn_timer = 0;
             }
@@ -2300,6 +2302,8 @@ void game_update(Game *g, const FrameInput *input) {
                             powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
                             /* F5 P1-ASM-35: tag with destroyer's owner (ball path). */
                             g->powerups[g->powerup_count].owner = g->balls[i].owner;
+                            SPAWN_LOG(g, "powerup_spawn(ball): type=%d at x=%d y=%d (brick %d)",
+                                      pt, bx, by, hidx);
                             g->powerup_count++;
                             g->option_spawn_timer = 0;
                         }
