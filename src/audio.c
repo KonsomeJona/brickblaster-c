@@ -41,7 +41,7 @@
  *       DEATH.wav  is shared for iff_game_over and iff_death.
  * -------------------------------------------------------------------------- */
 static const char *sfx_paths[SFX_COUNT] = {
-    ASSETS_BASE "audio/BOUNCE.wav",   /* SFX_BOUNCE        — iff_cursor    MAIN.ASM:4217 */
+    ASSETS_BASE "audio/WALL.wav",     /* SFX_BOUNCE        — port deviation: ASM iff_cursor maps to BOUNCE.wav (same as iff_normale), making paddle hits indistinguishable from brick hits. Route paddle to WALL.wav so the player can audibly tell paddle vs brick events apart. MAIN.ASM:4217 */
     ASSETS_BASE "audio/BOUNCE.wav",   /* SFX_BRICK_HIT     — iff_normale   MAIN.ASM:4032 */
     ASSETS_BASE "audio/WALL.wav",     /* SFX_WALL_HIT      — iff_incassable MAIN.ASM:4055 */
     ASSETS_BASE "audio/PERTEBAL.wav", /* SFX_BALL_LOST     — iff_lost_ball MAIN.ASM:4581 */
