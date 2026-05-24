@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(brickblaster C)
+project(brickblaster VERSION 0.1.8 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+add_compile_definitions(BRICKBLASTER_VERSION="${PROJECT_VERSION}")
 
 # TakoHi publisher branding (logo + URL at end of intro).
 # Default ON for distributed builds; set to OFF for a 100% vanilla port.

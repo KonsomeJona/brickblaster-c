@@ -24,6 +24,27 @@ _nothing yet_
 
 ---
 
+## [0.1.6] — 2026-04-30
+
+### Added
+- **Powerup pickup banner** in the HUD `panel_info` area.
+- **KITT scanner** animation on the paddle's three red lights (pixel-perfect LED crops, slower sweep).
+- **Touch buttons** for hiscore name entry (pen / tablet users).
+- **Windows multi-arch release**: `Win32` + `x64` + `ARM64` binaries.
+
+### Changed
+- **Audio**: paddle bounce now routes to `WALL.wav` so it no longer echoes the brick-hit sample.
+- **Audio**: speedup SFX plays when the natural speed-timer expires.
+
+### Fixed
+- **Demo AI** ignores ghost balls and stuck-ghost respawn triggers — paddle no longer pegs the screen edge.
+- **Input** clamps cursor X (overshoot no longer freezes the paddle); Win32 cursor is polled directly so focus loss doesn't freeze it either.
+- **Powerup**: NIGHT effect was being cleared one frame after pickup.
+- **Ghost ball** is destroyed before the paddle bounce flips `vy`.
+- **Hiscore** prompt no longer overlaps row 14 at the bottom of the screen.
+
+---
+
 ## [0.1.5] — 2026-04-22
 
 ### Added

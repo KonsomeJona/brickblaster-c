@@ -695,6 +695,14 @@ int main(void) {
      * ignores the viewport). */
     srand((unsigned int)time(NULL));  /* seed RNG so powerups vary each session */
 
+#if !defined(PLATFORM_ANDROID) && !defined(PLATFORM_WEB)
+    /* MSIX/Start-menu activation hands us an arbitrary CWD (typically
+     * C:\WINDOWS\system32). Anchor CWD on the exe directory so relative
+     * "assets/..." paths resolve to the install layout. Must run before
+     * InitWindow because the window icon load already reads from assets/. */
+    ChangeDirectory(GetApplicationDirectory());
+#endif
+
 #if defined(PLATFORM_ANDROID)
     InitWindow(0, 0, "Blaster");
 #else
