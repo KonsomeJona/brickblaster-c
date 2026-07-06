@@ -78,6 +78,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}.${{ matrix.archive_ext }}
           if-no-files-found: error
+          retention-days: 7
 
   release:
     name: Release
