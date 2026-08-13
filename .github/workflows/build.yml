@@ -47,7 +47,11 @@ jobs:
             libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        # Quote the -D argument: on windows-latest this step runs under pwsh,
+        # which re-parses the bare token and hands CMake "3" instead of "3.5"
+        # ("Invalid CMAKE_POLICY_VERSION_MINIMUM value"). Quoting passes it
+        # through verbatim on all three runners.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
       - name: Build
         run: cmake --build build --config Release --parallel
