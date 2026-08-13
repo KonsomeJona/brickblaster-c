@@ -73,6 +73,36 @@ void demo_update_paddle(Game *g) {
 
     /* Apply play area clamp — MOUSE.ASM:55-68  after move, clamp to [PLAY_X1..PLAY_X2-w] */
     paddle_clamp(&g->paddle);
+
+    /* MAIN.ASM:5148-5164  demo_move_x_player_2 — the 2-player attract demo
+     * drives cursor_2 the SAME way: snap it under ball_2 every frame.
+     *   cmp demo_flag,On   jne @@ok
+     *   cmp nbs_player,2   jne @@ok
+     *   cmp game_mode,PLAYING jne @@end
+     *   mov eax,ball_2.sprite_pos_x
+     *   mov ebx,cursor_2.sprite_size_x
+     *   shr ebx,1
+     *   sub eax,ebx
+     *   mov cursor_2.sprite_pos_x,eax
+     * This is NOT gated on the "computer P2" menu choice (control_2) — the
+     * demo always pilots cursor_2 itself. The port previously only moved
+     * paddle_2 through demo_ai_player_2, which main.c invokes when
+     * state.control_p2 == 0; the auto-demo leaves control_p2 at its default
+     * (keyboard), so paddle_2 stood still, P2's ball dropped on every serve,
+     * and the coop life-lost path wiped the surviving ball mid-flight —
+     * seen by players as "ball hits a hard brick, vanishes, pad re-serves". */
+    if (g->game_mode > 0 && g->state == STATE_PLAYING) {
+        Ball *p2_ball = NULL;
+        for (i = 0; i < g->ball_count; i++) {
+            Ball *b = &g->balls[i];
+            if (!b->active || b->is_magnetic || b->is_ghost) continue;
+            if (b->owner == 1) { p2_ball = b; break; }
+        }
+        if (p2_ball) {
+            g->paddle_2.x = p2_ball->x - g->paddle_2.w / 2;
+            paddle_clamp(&g->paddle_2);
+        }
+    }
 }
 
 /* --------------------------------------------------------------------------
