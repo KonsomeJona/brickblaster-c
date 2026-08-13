@@ -209,10 +209,16 @@ static void UpdateDrawFrame(void) {
      * random event from the 1999 binary. */
     asm_calc_random();
 
-#if defined(PLATFORM_WEB)
-    /* Web: poll + swap inside the callback (browser handles frame pacing) */
-    PollInputEvents();
-#endif
+    /* Web: no PollInputEvents() here — it runs at the END of the frame, see
+     * SwapScreenBuffer() below. Polling at the top destroyed every input edge
+     * on the browser: JS delivers events BETWEEN frames, so the callback sets
+     * currentButtonState, then a top-of-frame poll copies previous = current
+     * before the game ever reads it. IsMouseButtonPressed / IsKeyPressed /
+     * GetMouseDelta were dead 100% of the time — the web build was unplayable
+     * with a mouse or keyboard since the very first commit, while touch kept
+     * working because input_frame.c does its own edge detection.
+     * Native desktop is unaffected: glfwPollEvents() pumps events during the
+     * poll, i.e. after the copy. */
 
 #if defined(BRICKBLASTER_MOBILE)
     /* Foldable cover screen or unexpected portrait layout — pause everything
@@ -794,6 +800,9 @@ static void UpdateDrawFrame(void) {
 
 #if defined(PLATFORM_WEB)
     SwapScreenBuffer();
+    /* Poll AFTER the swap: an edge posted by a JS callback between two frames
+     * then survives until the next frame reads it. */
+    PollInputEvents();
 #endif
 }
 
