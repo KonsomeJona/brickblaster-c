@@ -49,6 +49,24 @@ typedef struct {
     int   p2_fire;          /* F key or gamepad1 A */
 } FrameInput;
 
+/* On-screen pause button — canvas coordinates (640x480), top-right margin
+ * (play area ends at x=528; the fire circle starts at y=165, the score panel
+ * ends at x=516 — this rect overlaps neither). Drawn by
+ * draw_touch_pause_button() (screen_overlays.c), hit-tested in
+ * frame_input_poll(), excluded from game-tap/drag in mobile_controls.c.
+ * Only live when input_touch_ui_active() returns 1. */
+#define PAUSE_BTN_X  546
+#define PAUSE_BTN_Y   12
+#define PAUSE_BTN_W   80
+#define PAUSE_BTN_H   52
+
+/* Runtime "touch UI" flag — decides whether on-screen pause/exit tap targets
+ * exist. 1 on the Android mobile build (BRICKBLASTER_MOBILE, compile-time);
+ * on web it latches to 1 the first time a real touch point is seen (the same
+ * page is served to desktop and phone browsers, so a compile-time flag cannot
+ * decide); 0 on desktop and Wear OS. */
+int input_touch_ui_active(void);
+
 /* Poll all input sources and fill the FrameInput struct.
  * Must be called exactly once per frame, before game_update().
  *

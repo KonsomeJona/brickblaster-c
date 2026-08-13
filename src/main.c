@@ -311,7 +311,9 @@ static void UpdateDrawFrame(void) {
             if (state.control_p2 == 0 && game_initialized)
                 demo_ai_player_2(&game, &fi);
         }
-        /* Pause: P key, ESC, gamepad Start — no on-screen button (original). */
+        /* Pause: P key, ESC, gamepad Start, or the on-screen touch button
+         * (hit-tested inside frame_input_poll when the touch UI is active —
+         * see PAUSE_BTN_* / input_touch_ui_active in input_frame.h). */
     }
 
     /* -----------------------------------------------------------
@@ -532,6 +534,17 @@ static void UpdateDrawFrame(void) {
         /* Initialize game on first entry from menu */
         if (!game_initialized) init_game_session();
 
+        /* Pause from the ready overlay (P / gamepad Start / on-screen touch
+         * button). game.state is deliberately NOT touched — it stays
+         * READY_TO_PLAY(_AGAIN), so resuming returns to the ready wait
+         * instead of force-launching the ball. This is the touch player's
+         * only route to the pause overlay's EXIT before launching. */
+        if (fi.pause_pressed) {
+            state.game_mode = STATE_PAUSED;
+            pause_cooldown  = PAUSE_COOLDOWN_FRAMES;
+            break;
+        }
+
         game_update(&game, &fi);
         /* Sync: fire transitions game to STATE_PLAYING */
         state.game_mode = game.state;
@@ -547,6 +560,7 @@ static void UpdateDrawFrame(void) {
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
+        draw_touch_pause_button();   /* no-op unless touch UI active */
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
@@ -587,11 +601,14 @@ static void UpdateDrawFrame(void) {
             game.state == STATE_READY_TO_PLAY_AGAIN);
         /* Hint text removed — control mode help is in pause menu */
 #endif
+        /* On-screen pause button: touch players have no P/ESC — without it
+         * pause (and thus exit) is unreachable until game over. Hidden in
+         * attract mode (any tap should exit the demo, not pause it). */
+        if (!state.demo_flag) draw_touch_pause_button();
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
         draw_canvas_to_screen(&dc, &game);
-        /* Original: no on-screen pause button */
         FINISH_DRAWING();
         break;
     }
@@ -603,7 +620,8 @@ static void UpdateDrawFrame(void) {
     case STATE_PAUSED: {
         /* Cooldown: ignore all unpause input for the first N frames after pausing.
          * Prevents the same tap that triggered pause from immediately unpausing. */
-        /* Handle music/sfx toggle + resume/exit button taps every frame */
+        /* Handle music/sfx toggle + resume/exit button taps every frame.
+         * Returns 0=nothing, 1=resume tapped, 2=audio-toggle tap consumed. */
         int resume_pressed = pause_handle_input(&state, &fi);
         /* EXIT may have changed state to STATE_MENU — don't override it */
         if (state.game_mode != STATE_PAUSED) break;
@@ -627,16 +645,20 @@ static void UpdateDrawFrame(void) {
 
         if (pause_cooldown > 0) {
             pause_cooldown--;
-        } else if (resume_pressed ||
-                   (!audio_toggle_frame && GetKeyPressed() != 0) ||
-                   fi.click_pressed ||
-                   fi.pause_pressed ||
-                   gamepad_confirm() || gamepad_back()
+        } else if (resume_pressed == 1 ||
+                   (resume_pressed == 0 &&
+                    ((!audio_toggle_frame && GetKeyPressed() != 0) ||
+                     fi.click_pressed ||
+                     fi.pause_pressed ||
+                     gamepad_confirm() || gamepad_back()))
         ) {
             /* MAIN.ASM:1265-1271 @@wait: resume on ANY key (`cmp B [ebp+all],Off`)
-             * OR on mouse click (`call read_click`). */
-            game.state      = STATE_PLAYING;
-            state.game_mode = STATE_PLAYING;
+             * OR on mouse click (`call read_click`).
+             * Resume to whatever the game was doing when paused: PLAYING
+             * normally, but READY_TO_PLAY(_AGAIN) when paused from the ready
+             * overlay (game.state was left untouched there). */
+            if (game.state == STATE_PAUSED) game.state = STATE_PLAYING;
+            state.game_mode = game.state;
         }
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
@@ -644,11 +666,11 @@ static void UpdateDrawFrame(void) {
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
+        draw_touch_pause_button();   /* stays put — tapping it resumes */
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
         draw_canvas_to_screen(&dc, &game);
-        /* Original: no on-screen pause button (unpause via P/ESC/Start) */
         FINISH_DRAWING();
         break;
     }
@@ -813,7 +835,38 @@ int main(void) {
 #if defined(PLATFORM_ANDROID)
     InitWindow(0, 0, "Blaster");
 #else
+#if !defined(PLATFORM_WEB)
+    /* Resizable window: letterbox.h projects the 640x480 canvas onto any
+     * window size, so free resizing is safe — and required on displays where
+     * the fixed 1280x960 doesn't fit (MacBook effective resolutions 1280x832
+     * / 1440x900 leave the bottom of the playfield under the Dock). */
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+#endif
     InitWindow(WINDOW_W, WINDOW_H, "Blaster");
+#endif
+#if !defined(PLATFORM_ANDROID) && !defined(PLATFORM_WEB)
+    /* Clamp the initial window to the monitor's usable area. raylib exposes
+     * the full monitor size but not the OS work area, so reserve a fixed
+     * margin for menu bar / title bar / Dock / taskbar and shrink at 4:3.
+     * On monitors where 1280x960 already fits, nothing changes. */
+    {
+        int mon = GetCurrentMonitor();
+        int mon_w   = GetMonitorWidth(mon);
+        int mon_h   = GetMonitorHeight(mon);
+        int avail_w = mon_w - 32;
+        int avail_h = mon_h - 96;
+        if (avail_w > 0 && avail_h > 0 &&
+            (WINDOW_W > avail_w || WINDOW_H > avail_h)) {
+            float s  = (float)avail_w / (float)WINDOW_W;
+            float sh = (float)avail_h / (float)WINDOW_H;
+            if (sh < s) s = sh;
+            int w = (int)(WINDOW_W * s);
+            int h = (int)(WINDOW_H * s);
+            SetWindowSize(w, h);
+            /* Centre horizontally; sit just below the menu bar area. */
+            SetWindowPosition((mon_w - w) / 2, (mon_h - h) / 2 + 16);
+        }
+    }
 #endif
 #if defined(PLATFORM_WEB)
     /* InitWindow sets canvas to WINDOW_W x WINDOW_H, but the resize callback

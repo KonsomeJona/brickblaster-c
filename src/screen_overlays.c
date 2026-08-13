@@ -12,12 +12,37 @@
 
 #include "screen_overlays.h"
 #include "input_gamepad.h"
+#include "letterbox.h"
 #include "i18n.h"
 #include <stddef.h>
 #include <stdio.h>
 
 static BitmapFont s_font;
 static int s_font_ready = 0;
+
+/* Pause-overlay tap zones (canvas coords, 640x480). Drawn and hit-tested
+ * only when input_touch_ui_active() — desktop keyboard/mouse players keep
+ * the untouched 1999-style text overlay. Style matches mobile_controls.c
+ * (rounded translucent rect + border, TakoHi orange for the primary action). */
+static const Rectangle s_resume_rect = { 210, 196, 220, 56 };
+static const Rectangle s_exit_rect   = { 210, 270, 220, 56 };
+/* Tap targets wrapping the existing "music [m]" / "sfx [s]" lines
+ * (drawn at PANEL_INFO_POS_Y - 52 / - 32, FONTE is 22 px tall). */
+static const Rectangle s_music_rect  = { PANEL_INFO_POS_X - 5,
+                                         PANEL_INFO_POS_Y - 56, 260, 24 };
+static const Rectangle s_sfx_rect    = { PANEL_INFO_POS_X - 5,
+                                         PANEL_INFO_POS_Y - 32, 260, 24 };
+
+static void draw_tap_zone(Rectangle r, const char *label, Color border) {
+    DrawRectangleRounded(r, 0.18f, 6, (Color){30, 30, 44, 190});
+    DrawRectangleLinesEx(r, 2.0f, border);
+    if (s_font_ready) {
+        int tw = font_string_width(&s_font, label);
+        font_draw_string(&s_font, label,
+                         (int)(r.x + (r.width  - tw) / 2),
+                         (int)(r.y + (r.height - FONT_CHAR_H) / 2), WHITE);
+    }
+}
 
 void overlays_init(Assets *assets) {
     if (!assets || !assets->font_sheet_loaded) return;
@@ -55,6 +80,15 @@ void draw_pause_screen(ScreenState *state) {
              state->sfx_enabled ? "on " : "off");
     font_draw_string(&s_font, buf, PANEL_INFO_POS_X,
                      PANEL_INFO_POS_Y - 32, WHITE);
+
+    /* Touch UI: explicit resume/exit tap targets — without them a touch
+     * player is locked in the session until game over (no P/ESC key). The
+     * audio lines above double as tap targets (see pause_handle_input);
+     * left unboxed to keep the overlay readable. */
+    if (input_touch_ui_active()) {
+        draw_tap_zone(s_resume_rect, "resume", (Color){232, 115, 74, 255});
+        draw_tap_zone(s_exit_rect,   "exit",   (Color){110, 110, 135, 220});
+    }
 }
 
 /* MAIN.ASM:4681 — option_text_over */
@@ -104,8 +138,49 @@ int pause_handle_input(ScreenState *state, const FrameInput *input) {
         state->current_menu = 1;
         return 0;
     }
-    (void)input;
+
+    /* Touch UI tap zones (see draw_pause_screen). Canvas-space hit test of
+     * the centralized click/tap. Inactive on desktop (touch UI off), where
+     * the historical behaviour — any click resumes — is preserved by the
+     * caller (main.c uses fi.click_pressed when we return 0). */
+    if (input && input->click_pressed && input_touch_ui_active()) {
+        Vector2 cp = letterbox_screen_to_canvas(
+            (Vector2){ input->click_screen_x, input->click_screen_y });
+        if (CheckCollisionPointRec(cp, s_resume_rect)) return 1;
+        if (CheckCollisionPointRec(cp, s_exit_rect)) {
+            state->game_mode    = STATE_MENU;
+            state->current_menu = 1;
+            return 0;
+        }
+        if (CheckCollisionPointRec(cp, s_music_rect)) {
+            state->music_enabled = !state->music_enabled;
+            return 2;
+        }
+        if (CheckCollisionPointRec(cp, s_sfx_rect)) {
+            state->sfx_enabled = !state->sfx_enabled;
+            return 2;
+        }
+    }
     return 0;
+}
+
+/* On-screen pause button — two bars in a rounded rect, top-right margin
+ * (rect: PAUSE_BTN_* in input_frame.h). Same translucent style as the
+ * mobile touch buttons. No font dependency, no-op when the touch UI is off
+ * (desktop/Wear never see it; web only after a real touch is detected). */
+void draw_touch_pause_button(void) {
+    if (!input_touch_ui_active()) return;
+    Rectangle r = { PAUSE_BTN_X, PAUSE_BTN_Y, PAUSE_BTN_W, PAUSE_BTN_H };
+    DrawRectangleRounded(r, 0.25f, 6, (Color){30, 30, 44, 150});
+    DrawRectangleLinesEx(r, 2.0f, (Color){110, 110, 135, 190});
+    {
+        int bw = 7, bh = 24;
+        int cx = PAUSE_BTN_X + PAUSE_BTN_W / 2;
+        int cy = PAUSE_BTN_Y + PAUSE_BTN_H / 2;
+        Color bar = {200, 200, 215, 220};
+        DrawRectangle(cx - bw - 3, cy - bh / 2, bw, bh, bar);
+        DrawRectangle(cx + 3,      cy - bh / 2, bw, bh, bar);
+    }
 }
 
 #if defined(BRICKBLASTER_MOBILE)
