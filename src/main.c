@@ -38,6 +38,7 @@
 #include "hiscore.h"
 #include "game.h"
 #include "draw.h"
+#include "asm_random.h"  /* 1999 generator — boot init + per-frame tick */
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -121,12 +122,92 @@ static FrameInput         fi;  /* polled once per frame, passed to game_update *
 static int pause_cooldown = 0;
 
 /* -----------------------------------------------------------------------
+ * init_game_session — first-entry game initialisation.
+ * Shared by the ready-overlay path (normal play: ball waits for fire) and
+ * the STATE_PLAYING path (demo: MAIN.ASM:99  "mov game_mode,PLAYING" — the
+ * attract mode enters play directly and never shows the ready overlay).
+ * ----------------------------------------------------------------------- */
+static void init_game_session(void) {
+    /* Re-seed rand() (raylib GetRandomValue backend) at game start.  Only
+     * cosmetic draws outside the ASM (hiscore background) use it now — all
+     * gameplay randomness flows through asm_random, which is deliberately
+     * NOT re-seeded here (the 1999 binary never reseeds after boot). */
+    srand((unsigned int)(GetTime() * 1000000.0));
+    Difficulty diff = (Difficulty)state.difficulte;
+    /* game_mode: 0=solo, 1=coop, 2=dual (versus) — MAIN.ASM cfg. */
+    int gmode = 0;
+    if (state.nbs_player > 1) gmode = state.dual_flag ? 2 : 1;
+    game_init(&game, &assets, &audio, diff, gmode);
+    game.world = state.world;
+    /* Per-world sprite palette. MAIN.ASM:483/491  mov B [file_palette+6],'0'/'1'
+     * patches the palette filename, and FILE.ASM:776-791 Read_Palette swaps the
+     * sprite sheet's 768-byte palette on every world load. */
+    assets_select_world(&assets, state.world);
+    game.control_p2 = state.control_p2;
+    /* P1-ASM-34: inject cfg-derived per-difficulty spawn spacing. */
+    game_set_powerup_spacing(&game, cfg.delai_between_option);
+    /* F3 P1-ASM-36: inject cfg-derived per-difficulty monster delay. */
+    game_set_monster_delai(&game, cfg.monster_delai);
+    /* F6-01: inject cfg-derived per-powerup per-difficulty spawn freqs.
+     * ASM cite: FILE.ASM:965-973 overwrites struc_options option_easy/
+     * medium/hard at cfg load — random_options (MAIN.ASM:5493-5504)
+     * then reads the updated values. */
+    game_set_powerup_freq(&game, cfg.freq_option);
+    /* F2: inject cfg-derived per-difficulty speed-ramp divisor.
+     * ASM cite: FILE.ASM:1001-1005 overwrites change_speed_level_easy/
+     * medium/hard at cfg load; Blaster.cfg:45 ships (2,3,3), NOT the
+     * compiled-in 3/4/4 — without this the port played the 1999 build's
+     * defaults and 60/120 cells of the per-level speed table diverged. */
+    game_set_change_speed(&game, cfg.change_speed_level);
+    /* Demo mode: transfer flag so game AI drives the paddle */
+    if (state.demo_flag) game.demo_active = 1;
+    /* Dev test mode: load test level with all brick types */
+    if (state.dev_test) {
+        game.dev_test = 1;
+        game.dev_powerup_cycle = 0;
+        game.lives = BALL_MAX;
+        state.dev_test = 0;  /* consumed */
+    }
+    /* Demo starts on a RANDOM level — MAIN.ASM:1014-1019 (start_new_game,
+     * demo branch):
+     *   mov eax,level_number / dec eax / call get_random / inc eax
+     *   mov current_level,eax
+     * get_random(N) returns 0..N INCLUSIVE (MAIN.ASM:5103-5127: masks then
+     * rejects while eax > N), so dec/get_random/inc yields a level in
+     * 1..level_number (1..40). Normal play always starts on level 1. */
+    {
+        int start_level = 1;
+        if (state.demo_flag) {
+            int n = level_count(game.world);
+            if (n > 0) start_level = asm_get_random(n - 1) + 1;
+        }
+        game_load_level(&game, start_level);
+    }
+    game_spawn_ball(&game);
+    /* MAIN.ASM:99-101  demo entry: mov game_mode,PLAYING — skip the
+     * ready wait entirely. The ball launch itself (fixed velocity
+     * MAIN.ASM:2762-2764  sens_x=+3, sens_y=-4) is handled in game.c. */
+    if (state.demo_flag) game.state = STATE_PLAYING;
+    game_initialized = 1;
+}
+
+/* -----------------------------------------------------------------------
  * UpdateDrawFrame — one iteration of the main loop.
  * Called each frame by emscripten_set_main_loop (web) or the while loop (native).
  * ----------------------------------------------------------------------- */
 static int prev_screen_w = 0, prev_screen_h = 0;
 
 static void UpdateDrawFrame(void) {
+
+    /* DO NOT REMOVE — this call looks dead but is load-bearing for 1999
+     * parity.  DRAW.ASM:110 (wait_synchro) executes `call calc_random` once
+     * per frame, on EVERY frame of EVERY screen (menu, intro, game...), so
+     * the 1999 generator advances continuously between draws.  Which value
+     * the next get_random call sees therefore depends on HOW MANY FRAMES
+     * elapsed, not just on how many draws were made.  Removing this "unused"
+     * tick would freeze the stream between draws and desynchronise every
+     * random event from the 1999 binary. */
+    asm_calc_random();
 
 #if defined(PLATFORM_WEB)
     /* Web: poll + swap inside the callback (browser handles frame pacing) */
@@ -242,14 +323,51 @@ static void UpdateDrawFrame(void) {
 
     if (state.game_mode == STATE_NEW_PLAY && game_initialized) {
         game.level_num++;
-        if (game.level_num > LEVELS_PER_FILE) {
-            /* All 80 levels done — victory! */
-            state.game_mode = STATE_FINAL;
-        } else {
+        /* MAIN.ASM:912-929  next_level:
+         *   inc current_level / mov eax,current_level
+         *   cmp eax,level_number / jbe _next_level
+         *   ...  call display_score_from_final     ; past the last level
+         * level_number is the PLAYABLE count from search_level_number
+         * (MAIN.ASM:5025-5041, stops at the first 0xFF block) — 40 per
+         * world, NOT the 80-slot file capacity. */
+        int total = level_count(game.world);
+        if (total < 1) total = 1;   /* missing file: end campaign now */
+        if (game.level_num > total) {
+            /* MAIN.ASM:920-932  next_level, past the last level:
+             *   cmp game_mode,EDIT / je @@ok
+             *   cmp computer_flag,On / je @@cont
+             *   cmp demo_flag,On / je @@ok
+             * @@cont: call display_score_from_final    ; victory
+             * @@ok:   mov current_level,1              ; demo wraps to level 1
+             * The demo never triggers the victory sequence — it loops. */
+            if (state.demo_flag) {
+                game.level_num = 1;
+            } else {
+                /* All playable levels done — victory! */
+                state.game_mode = STATE_FINAL;
+            }
+        }
+        if (state.game_mode != STATE_FINAL) {
             game_load_level(&game, game.level_num);
             game_spawn_ball(&game);
-            game.state      = STATE_READY_TO_PLAY;
-            state.game_mode = STATE_READY_TO_PLAY;
+            /* MAIN.ASM:961-967  _next_level:
+             *   cmp demo_flag,On / je @@cont     ; skips...
+             * @@ok: mov game_mode,READY_TO_PLAY  ; ...this
+             * @@cont: jmp start_game
+             * — the demo NEVER re-enters READY_TO_PLAY between levels; then
+             * Init_First_Ball (MAIN.ASM:2750-2751 cmp demo_flag,On / je @@demo,
+             * @@demo at 2761-2771) launches the ball(s) at fixed velocity and
+             * game_mode stays PLAYING. game_spawn_ball() already performs the
+             * @@demo launch when demo_active; without this branch the demo
+             * froze in READY (game_update returns early and the AI never
+             * presses fire). */
+            if (state.demo_flag) {
+                game.state      = STATE_PLAYING;
+                state.game_mode = STATE_PLAYING;
+            } else {
+                game.state      = STATE_READY_TO_PLAY;
+                state.game_mode = STATE_READY_TO_PLAY;
+            }
         }
     }
 
@@ -412,40 +530,7 @@ static void UpdateDrawFrame(void) {
             play_again_timer = PLAY_AGAIN_FRAMES;
         }
         /* Initialize game on first entry from menu */
-        if (!game_initialized) {
-            /* Re-seed rand() at game start using high-res timer.
-             * MAIN.ASM uses CPU timer ticks so each new game is different.
-             * time() only has 1s resolution; GetTime() gives sub-ms precision. */
-            srand((unsigned int)(GetTime() * 1000000.0));
-            Difficulty diff = (Difficulty)state.difficulte;
-            /* game_mode: 0=solo, 1=coop, 2=dual (versus) — MAIN.ASM cfg. */
-            int gmode = 0;
-            if (state.nbs_player > 1) gmode = state.dual_flag ? 2 : 1;
-            game_init(&game, &assets, &audio, diff, gmode);
-            game.world = state.world;
-            game.control_p2 = state.control_p2;
-            /* P1-ASM-34: inject cfg-derived per-difficulty spawn spacing. */
-            game_set_powerup_spacing(&game, cfg.delai_between_option);
-            /* F3 P1-ASM-36: inject cfg-derived per-difficulty monster delay. */
-            game_set_monster_delai(&game, cfg.monster_delai);
-            /* F6-01: inject cfg-derived per-powerup per-difficulty spawn freqs.
-             * ASM cite: FILE.ASM:965-973 overwrites struc_options option_easy/
-             * medium/hard at cfg load — random_options (MAIN.ASM:5493-5504)
-             * then reads the updated values. */
-            game_set_powerup_freq(&game, cfg.freq_option);
-            /* Demo mode: transfer flag so game AI drives the paddle */
-            if (state.demo_flag) game.demo_active = 1;
-            /* Dev test mode: load test level with all brick types */
-            if (state.dev_test) {
-                game.dev_test = 1;
-                game.dev_powerup_cycle = 0;
-                game.lives = BALL_MAX;
-                state.dev_test = 0;  /* consumed */
-            }
-            game_load_level(&game, 1);
-            game_spawn_ball(&game);
-            game_initialized = 1;
-        }
+        if (!game_initialized) init_game_session();
 
         game_update(&game, &fi);
         /* Sync: fire transitions game to STATE_PLAYING */
@@ -474,6 +559,11 @@ static void UpdateDrawFrame(void) {
      * MAIN.ASM:1061-1175
      * --------------------------------------------------------------- */
     case STATE_PLAYING: {
+        /* Demo entry lands here DIRECTLY from the menu without passing
+         * through the ready overlay (MAIN.ASM:99  mov game_mode,PLAYING) —
+         * initialise the session on demand. */
+        if (!game_initialized) init_game_session();
+
         /* Pause: P key, gamepad Start, or pause button. */
         if (fi.pause_pressed) {
             game.state      = STATE_PAUSED;
@@ -581,11 +671,19 @@ static void UpdateDrawFrame(void) {
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
         {
+            /* HISCORE.ASM:133-140  Display_score @@exit (dual):
+             *   mov eax,' eno'                          ; "one "
+             *   cmp player_2.player_nbs_ball,-1
+             *   je @@ok
+             *   mov eax,' owt'                          ; "two "
+             * @@ok: mov D winner,eax
+             * The original tests ONLY P2's counter: P1 wins iff P2 hit -1,
+             * otherwise P2 wins. There is NO draw case — elimination is
+             * asymmetric (once one player triggers game over, the other's
+             * counter stops decrementing), so exactly one survivor exists. */
             int winner = -1;
-            if (game.game_mode == 2) {
-                if (game.lives < 0 && game.lives_2 >= 0) winner = 1;
-                else if (game.lives_2 < 0 && game.lives >= 0) winner = 0;
-            }
+            if (game.game_mode == 2)
+                winner = (game.lives_2 < 0) ? 0 : 1;
             draw_game_over_screen(&state, &game_over_timer,
                                   game.game_mode, winner);
         }
@@ -693,7 +791,16 @@ int main(void) {
      * path which sets a viewport larger than the EGL surface, clipping all
      * rendered geometry while glClear still writes (OpenGL spec — clear
      * ignores the viewport). */
-    srand((unsigned int)time(NULL));  /* seed RNG so powerups vary each session */
+    srand((unsigned int)time(NULL));  /* seeds raylib's GetRandomValue backend
+                                       * (cosmetic draws only, e.g. hiscore
+                                       * background) — game randomness now
+                                       * comes from asm_random */
+
+    /* MAIN.ASM:46  call init_random — boot-time init of the 1999 generator.
+     * Deliberately UNSEEDED: the CMOS reads in init_random are commented out
+     * in the shipped sources, so every 1999 session starts from the same
+     * state.  Behaviour parity reproduces that (see asm_random.c). */
+    asm_random_reset();
 
 #if !defined(PLATFORM_ANDROID) && !defined(PLATFORM_WEB)
     /* MSIX/Start-menu activation hands us an arbitrary CWD (typically
@@ -730,8 +837,8 @@ int main(void) {
      * Quit is handled via state.quit_requested. */
     SetExitKey(KEY_NULL);
 
-    /* Seed rand() so powerup sequences differ each game.
-     * MAIN.ASM uses a get_random based on timer ticks; we use time(). */
+    /* (Duplicate of the boot-time srand above — kept as-is; it only feeds
+     * raylib's GetRandomValue backend, never the ASM-parity generator.) */
     srand((unsigned int)time(NULL));
     /* Frame pacing is manual via SUPPORT_CUSTOM_FRAME_CONTROL.
      * Do NOT call SetTargetFPS() — it has no effect. */

@@ -25,7 +25,14 @@
 
 typedef struct {
     unsigned char raw;   /* original encoded byte                      */
-    int hp;              /* hit-points (bits 4-0 of raw)               */
+    int hp;              /* hit-points, after the load-time transform  */
+    int hp_initial;      /* hp as the brick entered play (capped at 4).
+                          * The ASM stores the TRANSFORMED byte in the
+                          * play table (MAIN.ASM:4886-4891), so damage
+                          * must be measured against the capped value —
+                          * never against `raw`, or a 7-HP brick would
+                          * render three hits deep on the very first
+                          * frame.                                     */
     int color;           /* 0-3 decoded from bits 7-6                  */
     BrickType type;      /* BRICK_NORMAL / BRICK_INDESTRUCTIBLE / …    */
     int active;          /* 1 = exists on grid                         */

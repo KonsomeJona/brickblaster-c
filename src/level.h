@@ -20,7 +20,10 @@
 
 #include "constants.h"
 
-/* LEVELS_PER_FILE: 31200 / 390 = 80 — validated by FILE.ASM:1205 */
+/* LEVELS_PER_FILE: 31200 / 390 = 80 — FILE storage CAPACITY (FILE.ASM:1205
+ * "cmp ecx,31200" validates the file size, nothing more).  This is NOT the
+ * number of playable levels: the 1999 .lv files hold 40 real levels followed
+ * by 40 empty 0xFF slots.  Use level_count() for the playable count. */
 #define LEVELS_PER_FILE  80
 
 /* One level loaded from a .lv0/.lv1/.lv2 file
@@ -40,6 +43,21 @@ typedef struct {
  *   - Level N offset: (N-1) * BRICK_COUNT  (MAIN.ASM:1711-1714)
  * Returns 0 on success, -1 on error. */
 int level_load(Level *lvl, const char *path, int level_num);
+
+/* Number of PLAYABLE levels in the given world's .lv file (0/1/2).
+ * MAIN.ASM:5025-5041  search_level_number:
+ *     mov level_number,0
+ *   @@again:
+ *     cmp B [esi],-1          ; first byte of the 390-byte block == 0xFF ?
+ *     je @@end                ; yes → stop, level_number holds the count
+ *     inc level_number
+ *     add esi,nbs_brique_x*nbs_brique_y
+ * Counts 390-byte level blocks until the first one starting with 0xFF
+ * (invalide).  Measured on the 1999 data files: each .lv? is 31,200 bytes
+ * whose last 15,600 bytes are all 0xFF — 40 playable levels + 40 empty
+ * slots per world.  Returns 0 if the file is missing or has a bad size.
+ * Result is cached per world. */
+int level_count(int world);
 
 /* -----------------------------------------------------------------------
  * Grid helper — pure functions, testable without file I/O

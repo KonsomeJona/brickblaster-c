@@ -263,6 +263,12 @@ typedef struct {
      * 0 = use the compiled-in MONSTER_DELAI_* default. */
     int          cfg_monster_delai[3];
 
+    /* Iter3-H: Per-difficulty Nbs_Change_Speed_Level, injected from
+     * Blaster.cfg:45 (2,3,3) — FILE.ASM:1001-1005 overwrites the compiled-in
+     * change_speed_level_* at cfg load. Read by compute_launch_velocity.
+     * 0 = use the compiled-in CHANGE_SPEED_* macros. */
+    int          cfg_change_speed[3];
+
     /* F6-01: Per-powerup per-difficulty spawn frequencies, injected from
      * Blaster.cfg Freq_Option_* (FILE.ASM:962-973 + 1143 struc_options
      * option_easy/medium/hard). Row order matches PowerupType enum.
@@ -301,6 +307,8 @@ typedef struct {
         int x, y;       /* pixel position of destroyed brick centre */
         int frame;      /* 0..BREAK_NBS_ANIM-1 */
         int active;
+        int owner;     /* 0 = P1, 1 = P2 — MAIN.ASM:4183 vs 4306 */
+        int was_iron;  /* 1 if the popped ball was an iron ball  */
     } break_anims[MAX_BREAK_ANIMS];
 
     /* -------------------------------------------------------------------
@@ -378,6 +386,14 @@ void game_set_powerup_spacing(Game *g, const int delai_per_diff[3]);
  * data at FILE.ASM:1130-1132 (600/500/300). Pass NULL to revert to the
  * compiled-in MONSTER_DELAI_* defaults. */
 void game_set_monster_delai(Game *g, const int delai_per_diff[3]);
+
+/* Iter3-H: inject per-difficulty Nbs_Change_Speed_Level from Blaster.cfg:45
+ * ((2,3,3) — FILE.ASM:1001-1005 overwrites the compiled-in 3/4/4 at cfg
+ * load). Index order: [0]=easy, [1]=medium, [2]=hard. Consumed by
+ * compute_launch_velocity as the per-level speed-boost divisor
+ * (MAIN.ASM:5296-5307 mov ecx,change_speed_level_*). Pass NULL to revert
+ * to the CHANGE_SPEED_* macros. Modeled on game_set_powerup_spacing. */
+void game_set_change_speed(Game *g, const int cs[3]);
 
 /* F6-01: inject per-powerup per-difficulty spawn frequencies from Blaster.cfg
  * Freq_Option_* (FILE.ASM:962-973). `freq` is indexed [PowerupType][0=easy,

@@ -86,6 +86,9 @@ void hiscore_screen_load(HiscoreScreenState *hs, Assets *game_assets) {
         return;
     }
 
+    /* Deliberately NOT asm_random: this random background is a port invention
+     * with no ASM call site — drawing from the shared 1999 stream here would
+     * shift every subsequent gameplay draw and break stream parity. */
     hs->bg_index = GetRandomValue(0, 2);
     hs->name_entry_active = 0;
     hs->name_entry_pos = 0;
@@ -244,11 +247,15 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
             HiscoreEntry *e = &scores->entries[state->hiscore_mode][hs->entry_rank];
             /* Copy 15 letters into the entry; letter value 26 = ' ',
              * 27..36 = '0'..'9' (P1-ASM-19).
-             * HISCORE.ASM:278-344 Get_name fills exactly name_size = 15 bytes. */
+             * HISCORE.ASM:278-344 Get_name fills exactly name_size = 15 bytes.
+             * HISCORE.ASM:316  "or al,20h" — names are STORED lowercase:
+             * the 1999 FONTE has no uppercase glyphs at all (FONTE.ASM:418
+             * 'abcdefghijklmnopqrstuvwxyz0123456789+-#!?:.& '), so a .scr
+             * holding 'A'..'Z' would display blank names in the DOS binary. */
             for (int ni = 0; ni < HISCORE_NAME_LEN; ni++) {
                 int lv = hs->letter_values[ni];
                 char c;
-                if (lv >= 0 && lv < 26)       c = (char)('A' + lv);
+                if (lv >= 0 && lv < 26)       c = (char)('a' + lv);
                 else if (lv >= 27 && lv < 37) c = (char)('0' + (lv - 27));
                 else                          c = ' ';
                 e->name[ni] = c;

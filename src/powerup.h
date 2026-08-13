@@ -116,18 +116,34 @@ int powerup_collected(const Powerup *p, const Paddle *paddle);
  *
  * Implements random_options from MAIN.ASM:5472-5513.
  * Algorithm:
- *   1. Pick random index 0..(options_number-2) = 0..22  [MAIN.ASM:5473  options_number-1]
- *      (index 23 = COLLISION is sampled in the pool but its status=Off so it is skipped)
+ *   1. Pick random index 0..(options_number-1) = 0..23  [MAIN.ASM:5473-5474
+ *      mov eax,options_number-1 / call get_random — get_random (MAIN.ASM:5103-5127)
+ *      is inclusive of both bounds, so index 23 = COLLISION can be drawn.
+ *      Its option_status is Off outside 2-player mode (MAIN.ASM:5443-5446),
+ *      so the CALLER must reject POWERUP_COLLISION when not in 2-player mode.]
  *   2. Look up frequency for this difficulty.
  *   3. freq == 0 → not valid, try again.
  *   4. freq == 1 → always spawn this type.
- *   5. freq >= 2 → get_random(freq-1); if result != 0 → not spawned this time.
+ *   5. freq >= 2 → get_random(freq-1) → 0..freq-1 inclusive; if result != 0 →
+ *      not spawned this time (spawn probability = 1/freq).
  *
  * diff: DIFFICULTY_EASY=1, DIFFICULTY_MEDIUM=2, DIFFICULTY_HARD=4  (Blaster.inc:16-18)
  *
  * Returns POWERUP_COUNT (24) when no powerup should spawn this call
  * (frequency roll failed).  Caller checks result < POWERUP_COUNT. */
 PowerupType powerup_random_type(Difficulty diff);
+
+/* Draw a powerup index 0..POWERUP_COUNT-1 with the last_random reroll:
+ * MAIN.ASM:5472-5477
+ *   @@again: mov eax,options_number-1 / call get_random
+ *            cmp eax,last_random / je @@again
+ *            mov last_random,eax
+ * The 1999 game never drops the same candidate index twice in a row; the
+ * reroll CONSUMES extra generator draws, so it must run at the draw site for
+ * stream parity.  last_random (MAIN.ASM:5555 `last_random dd ?`) is a single
+ * global shared by every difficulty/cfg path — hence this shared helper,
+ * used by both powerup_random_type() and game.c's cfg path. */
+int powerup_draw_index(void);
 
 /* Return the default duration in frames for the active effect of a powerup.
  *   0  = instant effect (applies immediately, no ongoing timer used)
@@ -139,11 +155,18 @@ PowerupType powerup_random_type(Difficulty diff);
  *
  * Instant types (set current_option=Off in their handler):
  *   BALL_3, BALL_6, BALL_9, BALL_20, DEATH, NEW_LIFE, DEL_MONSTER, ADD_MONSTER,
- *   BONUS, MALUS, NEXT_LEVEL
+ *   BONUS, MALUS, NEXT_LEVEL, GHOST
+ *
+ * One-pass types (Refresh_Ball @@end resets current_option to Off in the same
+ * pass, MAIN.ASM:2884-2899 @@reset_current_option lists iron/telepod/fast/slow):
+ * SLOW_BALL and FAST_BALL are a single speed step; TELEPOD is a single jump
+ * (teleporte_ball per ball, MAIN.ASM:2873-2875; option_telepod_p is a bare ret,
+ * MAIN.ASM:6634-6637); IRON_BALL sets sprite_rebond=Off per ball
+ * (MAIN.ASM:2844-2846), never restored → permanent per ball. All return 0.
  *
  * Timed types (current_option_count = DELAI_OPTION = 600):
- *   SHOOT, SLOW_BALL, FAST_BALL, IRON_BALL, TELEPOD, NIGHT, SMALL_SHIP,
- *   LARGE_SHIP, REVERSE, MAGNETIC, GHOST, MINI_SHOOT
+ *   SHOOT, NIGHT, SMALL_SHIP,
+ *   LARGE_SHIP, REVERSE, MAGNETIC, MINI_SHOOT
  *
  * Special:
  *   COLLISION = 0 (2-player only, instant effect) */

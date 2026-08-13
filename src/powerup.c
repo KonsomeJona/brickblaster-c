@@ -7,7 +7,7 @@
  * Integer-only arithmetic throughout.
  */
 
-#include <stdlib.h>  /* rand() used for get_random equivalent */
+#include "asm_random.h"  /* asm_get_random — 0..n INCLUSIVE, like ASM get_random */
 
 /* ============================================================================
  * Frequency table
@@ -200,15 +200,16 @@ int powerup_collected(const Powerup *p, const Paddle *paddle)
  *   1. Increment and compare delai_random_option against threshold (caller's job).
  *      We skip that step; the caller decides when to call this function.
  *
- *   2. Pick random index 0..(options_number-2) = 0..22  (MAIN.ASM:5473):
+ *   2. Pick random index 0..(options_number-1) = 0..23  (MAIN.ASM:5473-5474):
  *        mov eax, options_number-1   → eax = 23
- *        call get_random             → eax = rand() % 23 → [0..22]
- *      (Note: options_number=24, options_number-1=23 passed to get_random which
- *       returns 0..N-1 = 0..22. Index 23 = COLLISION has status=Off so even if
- *       rolled it would be rejected by the status check.)
+ *        call get_random             → eax = get_random(23) → [0..23] INCLUSIVE
+ *      (get_random MAIN.ASM:5103-5127 builds a bit mask then REJECTS draws > N
+ *       — `cmp eax,ebx / ja @@cont` — so it returns 0..N inclusive, N+1 values.
+ *       options_number = 24, MAIN.ASM:6959.)
  *
  *   3. Look up [eax.option_status]: if Off → skip (@@end with no spawn).
- *      COLLISION (index 23) has status=Off unless 2-player mode.
+ *      COLLISION (index 23) has status=Off unless 2-player mode
+ *      (MAIN.ASM:5443-5446).
  *
  *   4. Load frequency for current difficulty (MAIN.ASM:5493-5504).
  *
@@ -216,10 +217,10 @@ int powerup_collected(const Powerup *p, const Paddle *paddle)
  *        cmp eax,1   je @@forced     → freq==1: always spawn
  *        cmp eax,Off je @@again      → freq==0: retry random (skip)
  *        dec eax
- *        call get_random             → rand() % (freq-1)
+ *        call get_random             → get_random(freq-1) → 0..freq-1 inclusive
  *        or eax,eax
  *        jnz @@end                   → non-zero: no spawn this call
- *      → jz falls through to @@forced: spawn.
+ *      → jz falls through to @@forced: spawn. Probability = 1/freq.
  *
  * Returns POWERUP_COUNT when no powerup should spawn.
  *
@@ -227,18 +228,37 @@ int powerup_collected(const Powerup *p, const Paddle *paddle)
  * delay (delai_random_option / delai_between_option). The caller must implement
  * the timing gate.
  * ========================================================================== */
+/* MAIN.ASM:5472-5477 — the @@again reroll around the index draw.  See the
+ * contract in powerup.h.  last_random lives in .data as `dd ?` (MAIN.ASM:5555),
+ * i.e. zero at load time and NEVER reset between games — a static here. */
+int powerup_draw_index(void)
+{
+    /* MAIN.ASM:5555  last_random dd ?  — loader-zeroed, persists across games */
+    static int last_random = 0;
+    int idx;
+    do {
+        /* MAIN.ASM:5473-5474  mov eax,options_number-1 / call get_random
+         * get_random (MAIN.ASM:5103-5127) is INCLUSIVE: it rejects draws > N
+         * (`cmp eax,ebx / ja @@cont`), so it returns 0..N — N+1 values.
+         * options_number = 24 (MAIN.ASM:6959) → range 0..23. */
+        idx = asm_get_random(POWERUP_COUNT - 1);
+    } while (idx == last_random);   /* MAIN.ASM:5475-5476  cmp/je @@again */
+    last_random = idx;              /* MAIN.ASM:5477  mov last_random,eax */
+    return idx;
+}
+
 PowerupType powerup_random_type(Difficulty diff)
 {
     int freq;
     int roll;
-    /* MAIN.ASM:5473  mov eax,options_number-1 → range is 0..22
-     * options_number = 24  (MAIN.ASM:6959) */
-    int idx = rand() % (POWERUP_COUNT - 1);  /* 0..22, index 23 (COLLISION) excluded */
+    int idx = powerup_draw_index();  /* 0..23, COLLISION included */
 
-    /* COLLISION (index 23) has status=Off; since we only pick 0..22 it is
-     * automatically excluded — matching MAIN.ASM behaviour where its status
-     * flag prevents it from ever being picked in random mode.
-     * MAIN.ASM:5482-5483  cmp [eax.option_status],Off  je @@end */
+    /* COLLISION (index 23) IS drawable. Its option_status is Off except in
+     * 2-player mode (MAIN.ASM:5443-5446  mov option_collision.option_status,On
+     * when nbs_player==2); the status check then rejects it:
+     * MAIN.ASM:5482-5483  cmp [eax.option_status],Off  je @@end
+     * This function has no player-count knowledge — the CALLER must reject
+     * POWERUP_COLLISION when not in 2-player mode. */
 
     /* Look up frequency for this difficulty
      * MAIN.ASM:5493-5504 */
@@ -268,11 +288,11 @@ PowerupType powerup_random_type(Difficulty diff)
 
     /* MAIN.ASM:5510-5513
      *   dec eax              → freq - 1
-     *   call get_random      → rand() % (freq-1)
+     *   call get_random      → 0..freq-1 INCLUSIVE (freq possible values)
      *   or eax,eax
      *   jnz @@end            → non-zero: no spawn
-     * Spawn only when get_random returns 0, i.e. probability = 1/(freq-1). */
-    roll = rand() % (freq - 1);
+     * Spawn only when get_random returns 0, i.e. probability = 1/freq. */
+    roll = asm_get_random(freq - 1);
     if (roll != 0) {
         return (PowerupType)POWERUP_COUNT;  /* no spawn */
     }
@@ -313,16 +333,31 @@ int powerup_duration(PowerupType type)
         case POWERUP_NEXT_LEVEL:  /* MAIN.ASM:6726  option_next_level_p: instant level advance */
         case POWERUP_GHOST:       /* MAIN.ASM:6788  mov current_option,Off — ghost is instant;
                                    * ghost balls self-destruct on contact, no timed state needed */
+        case POWERUP_SLOW_BALL:   /* MAIN.ASM:2885-2899  Refresh_Ball @@end:
+                                   * current_option==slow_ball → @@reset_current_option
+                                   * (mov current_option,Off) after ONE pass —
+                                   * a single speed step, NOT a 600-frame ramp. */
+        case POWERUP_FAST_BALL:   /* MAIN.ASM:2885-2899  same one-pass reset as
+                                   * slow_ball: one speed step, then Off. */
+        case POWERUP_IRON_BALL:   /* MAIN.ASM:2844-2846  while current_option==
+                                   * iron_ball, each ball gets sprite_rebond=Off —
+                                   * NEVER restored: permanent per ball until the
+                                   * ball is lost. Option side is reset after one
+                                   * pass (MAIN.ASM:2885-2899 @@reset_current_option),
+                                   * so no 600-frame timer. */
+        case POWERUP_TELEPOD:     /* MAIN.ASM:6634-6637  option_telepod_p is a
+                                   * bare ret. The effect is teleporte_ball called
+                                   * per ball inside the same Refresh_Ball pass
+                                   * (MAIN.ASM:2873-2875), then @@reset_current_option
+                                   * (MAIN.ASM:2884-2899, option_telepod_o listed)
+                                   * writes current_option=Off — one-shot jump,
+                                   * NOT a 600-frame timer. */
             return 0;
 
         /* --- Timed powerups --- duration = DELAI_OPTION = 600 frames
          * All set current_option_count = DELAI_OPTION at collection
          * (MAIN.ASM:5691  mov current_option_count,DELAI_OPTION). */
         case POWERUP_SHOOT:       /* MAIN.ASM:6509  option_shoot_p      */
-        case POWERUP_SLOW_BALL:   /* MAIN.ASM:6602  option_slow_ball_p  */
-        case POWERUP_FAST_BALL:   /* MAIN.ASM:6621  option_fast_ball_p  */
-        case POWERUP_IRON_BALL:   /* MAIN.ASM:6453  option_iron_ball_p  */
-        case POWERUP_TELEPOD:     /* MAIN.ASM:6470  option_telepod_p    */
         case POWERUP_NIGHT:       /* MAIN.ASM:6641  option_night_p — count
                                    * set by shared pipeline (MAIN.ASM:5691),
                                    * NOT by the handler itself. option_night_p

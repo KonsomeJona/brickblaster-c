@@ -5,6 +5,7 @@
  */
 
 #include "screen_menu.h"
+#include "asm_random.h"  /* 1999 generator — asm_get_random is 0..n INCLUSIVE */
 #include "font.h"
 #include "i18n.h"
 #include "letterbox.h"
@@ -138,15 +139,23 @@ static void menu_apply_action(ScreenState *state, int menu, int btn) {
                     state->current_menu = 2;  /* players screen */
                     break;
                 case 1: /* demo — launch directly (MAIN.ASM:85-115).
-                         * P1-ASM-15: ASM:87-90 randomises nbs_player to
-                         * {1,2} via get_random(1)+inc, so the attract
-                         * demo alternates solo/coop layouts. */
+                         * P1-ASM-15: MAIN.ASM:87-90 mov eax,1 / call
+                         * get_random / inc eax — coin flip + 1 → {1,2},
+                         * so the attract demo alternates solo/coop. */
                     state->demo_flag = 1;
-                    state->nbs_player = GetRandomValue(1, 2);
+                    state->nbs_player = asm_get_random(1) + 1;
                     state->dual_flag  = 0;
                     state->difficulte = 2;
-                    state->world = GetRandomValue(0, 1); /* MAIN.ASM:113 */
-                    state->game_mode = STATE_READY_TO_PLAY;
+                    /* MAIN.ASM:92-95  mov eax,1 / call get_random /
+                     * add eax,'0' / mov world,al — coin flip → world 0/1. */
+                    state->world = asm_get_random(1);
+                    /* MAIN.ASM:99-101  demo entry skips the ready overlay:
+                     *   mov game_mode,PLAYING
+                     *   mov demo_counter,DELAI_DEMO
+                     *   mov demo_flag,On
+                     * The ball is launched with a fixed velocity by the
+                     * game side (MAIN.ASM:2762-2764  sens_x=+3, sens_y=-4). */
+                    state->game_mode = STATE_PLAYING;
                     break;
                 case 2: state->current_menu = 6; break;   /* misc */
                 case 3: state->quit_requested = 1; break;  /* quit */
@@ -270,11 +279,15 @@ void menu_handle_input(ScreenState *state, MenuAssets *m, AudioState *audio,
      * conditions as the manual demo button above (P1-ASM-15). */
     if (menu == 1 && m->idle_frames >= IDLE_TO_DEMO) {
         state->demo_flag  = 1;
-        state->nbs_player = GetRandomValue(1, 2);
+        /* Same draws as the demo button above — MAIN.ASM:87-95:
+         * get_random(1)+1 for nbs_player, get_random(1) for world. */
+        state->nbs_player = asm_get_random(1) + 1;
         state->dual_flag  = 0;
         state->difficulte = 2;
-        state->world      = GetRandomValue(0, 1);
-        state->game_mode  = STATE_READY_TO_PLAY;
+        state->world      = asm_get_random(1);
+        /* MAIN.ASM:99-101  mov game_mode,PLAYING — demo starts in play
+         * state directly, never on the "ready ?" overlay. */
+        state->game_mode  = STATE_PLAYING;
         m->idle_frames    = 0;
         return;
     }

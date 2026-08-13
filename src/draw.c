@@ -19,9 +19,11 @@
  *   Blaster.inc:337  ghost_blue   = 018+(screen_x*000)  → Rect(18, 0, 9, 9)
  *   Blaster.inc:338  ghost_orange = 018+(screen_x*009)  → Rect(18, 9, 9, 9)
  *
- *   BREAK ANIMATION (5 frames, 9x9 each, NEXT_BALL=11 stride)
- *   Blaster.inc:344  break_ball_blue_o = 046+(screen_x*000) → Rect(46, 0, 9, 9)
- *   Blaster.inc:345  break_ball_orange = 046+(screen_x*009) → Rect(46, 9, 9, 9)
+ *   BREAK ANIMATION (5 frames, 9x9 each, stride 10 = size 9 + break_next_shape 1)
+ *   Blaster.inc:2  break_ball_blue_o = 046+(screen_x*000) → Rect(46, 0, 9, 9)
+ *   Blaster.inc:3  break_ball_orange = 046+(screen_x*009) → Rect(46, 9, 9, 9)
+ *   Blaster.inc:4  break_ball_yellow = 116+(screen_x*000) → Rect(116, 0, 9, 9)
+ *   Blaster.inc:5  break_ball_green  = 116+(screen_x*009) → Rect(116, 9, 9, 9)
  *
  *   PADDLE (P1 only in single-player; same Y row for each size)
  *   Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042)  → Rect(0,   42, 74, 25)
@@ -90,6 +92,18 @@ static const Rectangle SR_GHOST_BLUE       = { 18,  0, 9, 9 };
 /* Blaster.inc:338  ghost_ball_orange_o = 018+(screen_x*009) */
 static const Rectangle SR_GHOST_ORANGE     = { 18,  9, 9, 9 };
 
+/* P2 duel variants: MAIN.ASM:2803-2809 (Init_Ball) and MAIN.ASM:2855-2862
+ * (Refresh_Ball, iron) do `add [edx.sprite_adrs],9` for P2 in dual.
+ * +9 is an ADDRESS offset and the atlas row stride is 640 (screen_x),
+ * so it means 9 PIXELS TO THE RIGHT of the base sprite — not a row swap.
+ * Pixel-verified in SPRITE.png:
+ *   ( 9,9) green ball   ( 9,0) golden ball (iron)
+ *   (27,9) green ghost  (27,0) golden ghost (iron) */
+static const Rectangle SR_BALL_P2_GREEN    = {  9,  9, 9, 9 };
+static const Rectangle SR_BALL_P2_IRON     = {  9,  0, 9, 9 };
+static const Rectangle SR_GHOST_P2_GREEN   = { 27,  9, 9, 9 };
+static const Rectangle SR_GHOST_P2_IRON    = { 27,  0, 9, 9 };
+
 /* --- Paddle (Player 1 in single-player mode) --- */
 /* Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042) */
 static const Rectangle SR_PADDLE_NORMAL    = {   0, 42, 74, 25 };
@@ -134,14 +148,15 @@ static const Rectangle SR_BRICK_REFLET     = { 585, 97, 32, 16 };
 /* NEXT_OPTION = 26  (Blaster.inc:142) */
 #define POWERUP_STRIDE   26
 
-/* Y-offset per powerup: 0 = brown row (Y=752), 52 = red row (Y=804).
- * Ball powerups use the red row so they visually stand out. */
-static const int POWERUP_SPRITE_Y_OFF[POWERUP_COUNT] = {
-    52, 52, 52, 52,  /* BALL_3/6/9/20 → red row */
-     0,  0,  0,  0,  0,  0,  0,  0,
-     0,  0,  0,  0,  0,  0,  0,  0,
-     0,  0,  0,  0,
-};
+/* All falling options blit from the single Y=752 row:
+ * Blaster.inc:144-171  option_1_o = 001+(screen_x*752); every
+ * option_*_o is option_1_o + next_option*N — same row, no exception.
+ * The Y=802 row (option_fade_o, Blaster.inc:146) is only used for the
+ * picked-up icon in the HUD panel: MAIN.ASM:5692-5695
+ *   sub eax,option_1_o / add eax,option_fade_o → panel_option.sprite_adrs.
+ * (An earlier port revision sampled Y=804 for the ball options — 2 px
+ * inside the fade row — and compensated with flip tables; both removed,
+ * pixel-verified against SPRITE.png row 752: 24 clean upright icons.) */
 
 /* Sprite column for each PowerupType (0-based).
  * BONUS/MALUS are swapped: BONUS enum=20 → sprite col 21, MALUS enum=21 → col 20.
@@ -171,27 +186,6 @@ static const int POWERUP_SPRITE_COL[POWERUP_COUNT] = {
     20,  /* POWERUP_MALUS (enum=21) → sprite col 20   c672fcb */
     22,  /* POWERUP_MINI_SHOOT */
     23,  /* POWERUP_COLLISION  */
-};
-
-/* Y-flip flag per PowerupType: 1 = sprite stored upside-down in the PNG.
- * Indices 3 (BALL_20), 6 (SHOOT), 20 (BONUS) appear reversed in-game. */
-/* Y-flip: sprite stored upside-down in sheet (negative src.height) */
-static const int POWERUP_SPRITE_FLIP[POWERUP_COUNT] = {
-    1, 1, 0, 0,  /* 0=BALL_3 flipped, 1=BALL_6 flipped, 3=BALL_20 correct */
-    0, 0, 0, 0,  /* 6=SHOOT X-flip only (see below) */
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    1, 0, 0, 0,  /* 20=BONUS flipped */
-};
-/* X-flip: sprite stored mirrored in sheet (negative src.width) */
-static const int POWERUP_SPRITE_X_FLIP[POWERUP_COUNT] = {
-    0, 0, 0, 0,
-    0, 0, 1, 0,  /* 6=SHOOT x-flipped */
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
 };
 
 /* --- Projectiles in flight ---
@@ -239,8 +233,8 @@ static const Rectangle SR_PANEL_SCORE_P2  = { 444, 384, 90, 22 };
  *
  * Rightmost real ball is at (619, 0, 9, 9); further balls stack left
  * with stride 12. The port draws N independent 9x9 sprites at screen
- * positions PANEL_NBS_BALL_POS_X + i*NEXT_BALL, so a single-cell source
- * is enough. */
+ * positions PANEL_NBS_BALL_POS_X - (i+1)*12 (leftward, matching the ASM
+ * add sprite_pos_x,-12 per life), so a single-cell source is enough. */
 static const Rectangle SR_HUD_LIFE_P1     = { 619, 0, 9, 9 };
 static const Rectangle SR_HUD_LIFE_P2     = { 619, 9, 9, 9 };
 /* F5 P1-ASM-41c: option background + info banner — TODO.
@@ -289,8 +283,10 @@ static Rectangle get_brick_rect(const Brick *b) {
          * Blaster.inc:342  brique_classic_o = 066+(screen_x*095) — single-hit bricks
          * Blaster.inc:343  brique_multi_o   = 033+(screen_x*095) — multi-hit bricks */
         {
-            int orig_hp = b->raw & RESISTANCE_DE_BRIQUE;
-            base_x = (orig_hp > 1) ? BRICK_MULTI_BASE_X : BRICK_BASE_X;
+            /* Same capped value as the damage state below — equivalent here
+             * (both 7 and the capped 4 are > 1) but reading `raw` twice with
+             * two different meanings is how the damage bug got in. */
+            base_x = (b->hp_initial > 1) ? BRICK_MULTI_BASE_X : BRICK_BASE_X;
         }
         base_y = BRICK_BASE_Y;
         break;
@@ -307,9 +303,12 @@ static Rectangle get_brick_rect(const Brick *b) {
      * damage_state = clamped HP reduction (0=fresh, 4=almost dead) */
     int damage_state = 0;
     if (b->type == BRICK_NORMAL) {
-        /* Original brick HP in raw byte (bits 4-0). Damage state = original_hp - current_hp.
-         * We clamp to 0..4 (5 states maximum). */
-        int orig_hp = b->raw & RESISTANCE_DE_BRIQUE;
+        /* Damage state = hits taken since the brick entered play.  Measure it
+         * against hp_initial (the load-time capped value the ASM stores in the
+         * play table, MAIN.ASM:4886-4891), NOT against the raw byte: a raw
+         * 7-HP brick enters play at 4, so `raw` would report 3 hits already
+         * taken on the first frame. */
+        int orig_hp = b->hp_initial;
         int cur_hp  = b->hp;
         damage_state = orig_hp - cur_hp;
         if (damage_state < 0) damage_state = 0;
@@ -336,10 +335,12 @@ static Rectangle get_powerup_rect(PowerupType type, int p2_owned_dual) {
     int idx = (int)type;
     if (idx < 0 || idx >= POWERUP_COUNT) idx = 0;
     int col = POWERUP_SPRITE_COL[idx];
-    int y_decal = p2_owned_dual ? 25 : 0;  /* Blaster.inc:145  option_2_decal */
+    /* Blaster.inc:145  option_2_decal = 001+(screen_x*777)-option_1_o
+     * = +25 rows → Y=777 (pixel-verified populated icon row). */
+    int y_decal = p2_owned_dual ? 25 : 0;
     Rectangle r = {
         (float)(POWERUP_BASE_X + col * POWERUP_STRIDE),
-        (float)(POWERUP_BASE_Y + POWERUP_SPRITE_Y_OFF[idx] + y_decal),
+        (float)(POWERUP_BASE_Y + y_decal),
         (float)OPTION_W,
         (float)OPTION_H
     };
@@ -508,20 +509,8 @@ static void draw_powerups(DrawContext *dc, const Game *g) {
         /* F5 P1-ASM-35: P2 duel options draw from the +25-row atlas tile. */
         int p2_owned_dual = (g->game_mode == 2 && p->owner == 1);
         Rectangle src = get_powerup_rect(p->type, p2_owned_dual);
-        /* Y-flip: some sprites are stored upside-down in the sheet. */
-        {
-            int pidx = (int)p->type;
-            if (pidx >= 0 && pidx < POWERUP_COUNT) {
-                if (POWERUP_SPRITE_FLIP[pidx]) {
-                    src.y += src.height;
-                    src.height = -src.height;
-                }
-                if (POWERUP_SPRITE_X_FLIP[pidx]) {
-                    src.x += src.width;
-                    src.width = -src.width;
-                }
-            }
-        }
+        /* No flips: MAIN.ASM:5522-5523 seeds sprite_adrs straight from the
+         * option_*_o table and Draw_sprites blits rows top-down as stored. */
         /* Wear OS: draw 2x centred (small watch screen needs larger touch target).
          * PC / Web / mobile tablet: draw at native 1x size (top-left at p->x, p->y). */
 #if defined(PLATFORM_ANDROID) && !defined(BRICKBLASTER_MOBILE)
@@ -545,59 +534,52 @@ static void draw_powerups(DrawContext *dc, const Game *g) {
  * DRAW.ASM:Draw_sprites — sprite_mode = ball → draw 9x9 sprite.
  * Ball sprite selection:
  *   P1 orange:     Rect(0, 9, 9, 9)    — Blaster.inc:333  ball_orange_o
- *   P2 blue:       Rect(0, 0, 9, 9)    — Blaster.inc:332  ball_blue_o (dual mode only)
- *   Ghost orange:  Rect(18, 9, 9, 9)   — Blaster.inc:338  ghost_ball_orange_o
- *   Ghost blue:    Rect(18, 0, 9, 9)   — Blaster.inc:337  ghost_ball_blue_o
- *   Iron ball:     same sprite as normal (no separate sprite in original ASM)
- * In single-player and coop, all balls are orange.
- * Blue balls are used by player 2 in dual (vs) mode only.
+ *   P2 dual green: Rect(9, 9, 9, 9)    — ball_orange_o + 9 px (MAIN.ASM:2803-2809)
+ *   Iron:          Rect(0, 0, 9, 9)    — Blaster.inc:332  ball_blue_o
+ *   Iron P2 dual:  Rect(9, 0, 9, 9)    — ball_blue_o + 9 px (MAIN.ASM:2855-2862)
+ *   Ghost variants sit +18 px right of each (MAIN.ASM:3352  sprite_adrs += 18).
+ * In single-player and coop, all balls are orange (blue while iron).
+ * The +9 px green/golden variants are for the P2-OWNED ball in dual only.
  * DRAW.ASM:Draw_sprites pixel blit skips color-index 0 (transparent mask).
  * ============================================================================ */
 static void draw_balls(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
 
     /* game_mode: 0=1P solo, 1=2P coop, 2=2P duel.
-     * Ball index 0 = P1 (orange); ball index 1 = P2 (blue in duel mode only). */
+     * Colour is per-OWNER: P2-owned balls in duel use the +9 px variants. */
     for (int i = 0; i < g->ball_count; i++) {
         const Ball *b = &g->balls[i];
         if (!b->active) continue;
 
-        /* Select sprite row.  Default (no iron):
-         *   P1             → ball_orange_o (Blaster.inc:333)
-         *   P2 in dual     → ball_blue_o   (Blaster.inc:332)
+        /* Select sprite.  Default (no iron):
+         *   any ball          → ball_orange_o (Blaster.inc:333)
+         *   P2-OWNED in dual  → +9 px right = green (MAIN.ASM:2803-2809:
+         *     mov [edx.sprite_adrs],ball_orange_o then, when dual_flag=On
+         *     and the owner cursor is not cursor_1, add [edx.sprite_adrs],9;
+         *     +9 bytes with a 640-byte row stride = 9 px right, NOT a row
+         *     change — ball_orange_o itself is 640*9).
          *
-         * Iron ball (option_iron_ball active): MAIN.ASM:2844-2849 sets
-         * sprite_current_adrs to `ball_blue_o` for every ball on every
-         * frame, then at MAIN.ASM:2855-2862 adds `+9` to the address if
-         * `dual_flag && player == player_2`.  Since ball_blue_o is at
-         * offset 0 and ball_orange_o at offset 9, this effectively
-         * INVERTS the dual-mode colour coding while iron is active:
-         *   1P / 2P coop  → both balls blue
-         *   2P dual       → P1 becomes blue, P2 becomes orange
+         * Iron ball: MAIN.ASM:2844-2849 (Refresh_Ball) sets sprite_adrs
+         * to ball_blue_o (blue), MAIN.ASM:2851-2853 to ghost_ball_blue_o
+         * for ghosts, then MAIN.ASM:2855-2862 adds +9 for the P2-owned
+         * ball in dual → golden variants at (9,0)/(27,0).
          *
-         * Earlier versions of this port missed the per-frame sprite
-         * update (looked only at `option_iron_ball_p`, which is a `ret`
-         * — the sprite swap is in the ball update loop, not the pickup
-         * handler). Reported upstream by david4599 (2026-04-21):
-         * "iron ball qui reste rouge". */
-        int is_p2_dual = (g->game_mode == 2 && i >= 1);
+         * Ownership follows the ball's OWNER (sprite_player in ASM),
+         * never its index — MAIN.ASM:2861 cmp [edx.sprite_player]. */
+        int is_p2_dual = (g->game_mode == 2 && b->owner == 1);
         Rectangle src;
         if (b->is_ghost) {
-            /* Ghost/bubble ball: use ghost sprite (bubble-like appearance).
-             * Blaster.inc:337-338  ghost_ball_blue/orange_o
-             * MAIN.ASM:3352  sprite_adrs += 18 (offset to ghost variant).
-             * Iron overlay: MAIN.ASM:2851-2853 mirrors the regular-ball
-             * swap — ghost_ball_blue_o, +9 for P2 in dual. */
+            /* Ghost/bubble ball: +18 px variant (MAIN.ASM:3352). */
             if (b->is_iron) {
-                src = is_p2_dual ? SR_GHOST_ORANGE : SR_GHOST_BLUE;
+                src = is_p2_dual ? SR_GHOST_P2_IRON : SR_GHOST_BLUE;
             } else {
-                src = is_p2_dual ? SR_GHOST_BLUE : SR_GHOST_ORANGE;
+                src = is_p2_dual ? SR_GHOST_P2_GREEN : SR_GHOST_ORANGE;
             }
         } else {
             if (b->is_iron) {
-                src = is_p2_dual ? SR_BALL_ORANGE : SR_BALL_BLUE;
+                src = is_p2_dual ? SR_BALL_P2_IRON : SR_BALL_BLUE;
             } else {
-                src = is_p2_dual ? SR_BALL_BLUE : SR_BALL_ORANGE;
+                src = is_p2_dual ? SR_BALL_P2_GREEN : SR_BALL_ORANGE;
             }
         }
 
@@ -692,36 +674,6 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
-/* KITT-style scanner over the 3 LED slots baked into the normal-size
- * paddle sprite. The original DOS sprite has them at relative (x=29,
- * 37, 45 / y=17) — centre is red, sides are dark. We re-blit two 5x5
- * patches cropped from the sheet itself (the centre red LED for "lit"
- * and the left dark LED for "off") so the animation is pixel-perfect:
- * - ON  source: SPRITE.png(35..39, 57..61) — centre red bulb + bg
- * - OFF source: SPRITE.png(27..31, 57..61) — left dark dot + bg
- * Each step shows OFF on the centre slot (since the sprite's red bulb
- * is baked there) and ON on the active slot. Port enhancement; the
- * ASM treated the paddle as a single static sprite. */
-static const Rectangle SR_LED_ON  = { 35.0f, 57.0f, 5.0f, 5.0f };
-static const Rectangle SR_LED_OFF = { 27.0f, 57.0f, 5.0f, 5.0f };
-static const int LED_REL_X[3]     = { 27, 35, 43 };  /* top-left of each 5x5 patch on the paddle */
-static const int LED_REL_Y        = 15;
-
-static void draw_paddle_lights(Texture2D sheet, int paddle_x, int paddle_y, int paddle_w) {
-    if (paddle_w != 74) return;  /* only normal paddle has 3 LEDs */
-    static const int CYCLE[4] = { 0, 1, 2, 1 };       /* KITT bounce */
-    int phase = ((int)(GetTime() * 4.0)) % 4;          /* 4 steps/sec, full cycle 1 s */
-    int lit   = CYCLE[phase];
-
-    /* Blot out the baked-in red centre with the OFF patch every frame, then
-     * stamp the ON patch on whichever slot is currently lit. */
-    Vector2 centre = { (float)(paddle_x + LED_REL_X[1]), (float)(paddle_y + LED_REL_Y) };
-    DrawTextureRec(sheet, SR_LED_OFF, centre, WHITE);
-
-    Vector2 active = { (float)(paddle_x + LED_REL_X[lit]), (float)(paddle_y + LED_REL_Y) };
-    DrawTextureRec(sheet, SR_LED_ON, active, WHITE);
-}
-
 /* Draw a single paddle with all overlays — exploded sprite while
  * explo_timer is counting, otherwise normal paddle + cannon flash +
  * optional telepod overlay on top. */
@@ -733,7 +685,9 @@ static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
     Rectangle src = get_paddle_rect(p, p2);
     Vector2 pos   = { (float)p->x, (float)p->y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-    draw_paddle_lights(dc->assets->sprite_sheet, p->x, p->y, (int)src.width);
+    /* (Non-ASM "KITT" LED scanner removed — DRAW.ASM draws the paddle
+     * as a single static sprite; same fidelity rule as the P0-ASM-6
+     * screen-shake/red-flash purge.) */
     draw_cannon_flash(dc, p, p2);
     if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
 }
@@ -824,66 +778,82 @@ static void draw_hud(DrawContext *dc, const Game *g) {
      * We centre the 2-digit level number within the 30px panel. */
     if (dc->assets->font_sheet_loaded) {
         char buf[8];
-        /* Level text: Blaster.inc:206  panel_level_pos_x=123 + centre offset
+        /* Level text: FONTE.ASM:117-138 display_level prints level_txt
+         * initialised to '00' — always 2 digits with a leading zero.
+         * 2 x FONT_CHAR_W(15) = 30 px = panel_level_size_x, so the pair
+         * exactly fills the panel (centre offset is 0).
          * F5 P1-ASM-41a: +182 in duel mode. */
-        snprintf(buf, sizeof(buf), "%d", g->level_num);
+        snprintf(buf, sizeof(buf), "%02d", g->level_num % 100);
         int lw = font_string_width(&dc->font, buf);
         int lx = lvl_panel_x + (PANEL_LEVEL_W - lw) / 2;
         int ly = PANEL_LEVEL_POS_Y + (PANEL_LEVEL_H - FONT_CHAR_H) / 2;
         font_draw_string(&dc->font, buf, lx, ly, WHITE);
 
-        /* Score text: Blaster.inc:214  panel_score_pos_x=426 */
-        snprintf(buf, sizeof(buf), "%d", g->score);
+        /* Score text: FONTE.ASM:21-36 _init_score seeds player_score_txt
+         * with '000000' — always 6 digits, leading zeros. 6 x 15 = 90 px
+         * = panel_score_size_x, exactly filling the panel at X=426. */
+        snprintf(buf, sizeof(buf), "%06d", g->score % 1000000);
         int sw = font_string_width(&dc->font, buf);
         int sx = PANEL_SCORE_POS_X + (PANEL_SCORE_W - sw) / 2;
         int sy = PANEL_SCORE_POS_Y + (PANEL_SCORE_H - FONT_CHAR_H) / 2;
         font_draw_string(&dc->font, buf, sx, sy, WHITE);
 
-        /* Multiplayer: P2 score.
-         * F5 P1-ASM-41b: ASM MAIN.ASM:6011 mov [edx.sprite_pos_x],panel_level_pos_x
+        /* P2 score — DUAL ONLY: FONTE.ASM:10-15 init_score prints the
+         * second score behind cmp dual_flag,On (nothing in coop).
+         * F5 P1-ASM-41b: MAIN.ASM:6011 mov [edx.sprite_pos_x],panel_level_pos_x
          * → P2 score panel sits at X=123 in dual. Text drawn with WHITE
          *   (no ASM tint — pink was a non-ASM invention). */
-        if (g->game_mode > 0) {
-            snprintf(buf, sizeof(buf), "%d", g->score_2);
+        if (g->game_mode == 2) {
+            snprintf(buf, sizeof(buf), "%06d", g->score_2 % 1000000);
             int sw2 = font_string_width(&dc->font, buf);
-            int p2_base_x = (g->game_mode == 2) ? PANEL_LEVEL_POS_X : 4;
-            int sx2 = p2_base_x + (PANEL_SCORE_W - sw2) / 2;
+            int sx2 = PANEL_LEVEL_POS_X + (PANEL_SCORE_W - sw2) / 2;
             font_draw_string(&dc->font, buf, sx2, sy, WHITE);
         }
     }
 
     /* --- Life ball indicators ---
-     * Blaster.inc:219  panel_nbs_ball_pos_x=518, panel_nbs_ball_pos_y_1=458
-     * Draw one ball sprite per remaining life, spaced 11px apart (NEXT_BALL=11).
-     * DRAW.ASM:Draw_sprites draws panel_nbs_ball_1 as sprite_mode=panel. */
+     * Blaster.inc:221-222  panel_nbs_ball_pos_x = limite_x-10 = 518, pos_y_1=458.
+     * MAIN.ASM:6056-6072 display_nbs_ball_player_1 — per life:
+     *   add sprite_size_x,12 / add sprite_current_adrs,-12 / add sprite_pos_x,-12
+     * i.e. the strip grows LEFT from x=518 at a 12 px stride (balls land at
+     * screen x = 518-12, 518-24, ...); the anchor cell at atlas X=631 is
+     * transparent, so 0 lives draws nothing. */
     if (dc->assets->sprite_sheet_loaded) {
         /* lives field = player_nbs_ball = starts at 2 (NBS_BALL_START).
-         * Display lives+1 as "balls remaining" (the one in play is lives+1).
-         * MAIN.ASM:4595  detect_game_over: dec player_nbs_ball → game over when < 0
-         * So actual visible count = lives + 1 (current ball counts). */
+         * MAIN.ASM:6064  mov ecx,player_1.player_nbs_ball / jecxz @@end —
+         * the ASM draws EXACTLY player_nbs_ball balls, no +1: the ball in
+         * play is not counted (MAIN.ASM:4674 dec player_nbs_ball → game
+         * over at -1, when the last SPARE is consumed).
+         * Cap = NBS_BALL_MAX = 19 (Blaster.inc:135), the same clamp
+         * option_new_life_p applies (MAIN.ASM:6436-6440) — the atlas holds
+         * 19 pixel-verified cells at x = 403+12k (403..619, rows 0 and 9);
+         * the anchor cell at x=631 is transparent. The 19th ball lands at
+         * screen x = 518-19*12 = 290, well inside the panel row. */
         int display_lives = g->lives;
         if (display_lives < 0) display_lives = 0;
-        if (display_lives > 9) display_lives = 9;   /* cap for display */
+        if (display_lives > BALL_MAX) display_lives = BALL_MAX;
 
         /* F5 P1-ASM-42: dedicated life-indicator sprites at X=631 in atlas.
          * Blaster.inc:217-218 panel_nbs_ball_1_o/_2_o — NOT the in-play ball
          * sprites (which live at X=0). */
         for (int i = 0; i < display_lives; i++) {
             Vector2 pos = {
-                (float)(PANEL_NBS_BALL_POS_X + i * NEXT_BALL),
+                (float)(PANEL_NBS_BALL_POS_X - (i + 1) * 12),
                 (float)PANEL_NBS_BALL_POS_Y1
             };
             DrawTextureRec(dc->assets->sprite_sheet, SR_HUD_LIFE_P1, pos, WHITE);
         }
 
-        /* Multiplayer: P2 lives row below P1 (panel_nbs_ball_pos_y_2=469). */
-        if (g->game_mode > 0) {
+        /* P2 lives row below P1 (panel_nbs_ball_pos_y_2=469) — DUAL ONLY:
+         * MAIN.ASM:6079 display_nbs_ball_player_2 opens with
+         *   cmp dual_flag,On / jne @@end — nothing is drawn in coop. */
+        if (g->game_mode == 2) {
             int dl2 = g->lives_2;
             if (dl2 < 0) dl2 = 0;
-            if (dl2 > 9) dl2 = 9;
+            if (dl2 > BALL_MAX) dl2 = BALL_MAX;   /* NBS_BALL_MAX = 19 */
             for (int i = 0; i < dl2; i++) {
                 Vector2 pos = {
-                    (float)(PANEL_NBS_BALL_POS_X + i * NEXT_BALL),
+                    (float)(PANEL_NBS_BALL_POS_X - (i + 1) * 12),
                     (float)PANEL_NBS_BALL_POS_Y2
                 };
                 DrawTextureRec(dc->assets->sprite_sheet, SR_HUD_LIFE_P2, pos, WHITE);
@@ -941,15 +911,30 @@ void draw_frame_to_canvas(DrawContext *dc, const Game *g) {
     draw_powerups(dc, g);
 
     /* Step 3b: Brick break animations
-     * DRAW.ASM:Refresh_Sprites — break_ball sprites cycle after brick destruction.
-     * Blaster.inc:344  break_ball_blue_o = 046+(screen_x*000) → Rect(46, 0, 9, 9)
-     * 5 frames at NEXT_BALL=11 px stride: x = 46 + frame*11 */
+     * DRAW.ASM:407-409 Refresh_Sprites advances the frame address by
+     *   sprite_size_x + sprite_next_shape; MAIN.ASM:4202/4325 seed
+     *   sprite_next_shape = break_next_shape = 1 (Blaster.inc:8),
+     *   so the stride is 9+1 = 10 px (NEXT_BALL=11, Blaster.inc:335, is
+     *   declared but never used anywhere in the ASM).
+     * Four colour variants (Blaster.inc:2-5):
+     *   break_ball_blue_o   = 046+(screen_x*000) — P1, iron ball
+     *   break_ball_orange_o = 046+(screen_x*009) — P1, normal
+     *   break_ball_yellow_o = 116+(screen_x*000) — P2, iron ball
+     *   break_ball_green_o  = 116+(screen_x*009) — P2, normal
+     * MAIN.ASM:4183-4192 (P1 paddle, @@end_ghost): ghost_ball_orange →
+     * break_ball_orange, else (iron = ghost_ball_blue, MAIN.ASM:2852) →
+     * break_ball_blue. MAIN.ASM:4306-4315 (P2 paddle): ghost_ball_green →
+     * break_ball_green, else → break_ball_yellow.
+     * Both families' 5 frames pixel-verified at x = 46..86 and 116..156
+     * (rows 0 and 9, identical occupancy per frame). */
     if (dc->assets->sprite_sheet_loaded) {
         for (int ba = 0; ba < MAX_BREAK_ANIMS; ba++) {
             if (!g->break_anims[ba].active) continue;
             int frame = g->break_anims[ba].frame;
             if (frame < 0 || frame >= BREAK_NBS_ANIM) continue;
-            Rectangle src = { (float)(46 + frame * NEXT_BALL), 9.0f, 9.0f, 9.0f };
+            int bx = g->break_anims[ba].owner    ? 116 : 46;  /* P2 : P1 */
+            int by = g->break_anims[ba].was_iron ?   0 :  9;  /* iron : normal */
+            Rectangle src = { (float)(bx + frame * 10), (float)by, 9.0f, 9.0f };
             Vector2 pos = { (float)g->break_anims[ba].x, (float)g->break_anims[ba].y };
             DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
         }

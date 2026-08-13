@@ -18,6 +18,7 @@
 #include "collision.h"
 #include "audio.h"
 #include "demo.h"
+#include "asm_random.h"  /* 1999 generator — asm_get_random is 0..n INCLUSIVE */
 #include <stdio.h>     /* snprintf */
 #include <string.h>    /* memset */
 #include <stdlib.h>    /* abs */
@@ -50,12 +51,17 @@
 /* Forward declarations for static helpers used before their definitions */
 static int compute_speed_level(int level_num);
 static PowerupType dev_next_powerup(Game *g);
-static void compute_launch_velocity(Difficulty diff, int level_num, int *out_vx, int *out_vy);
+static void compute_launch_velocity(const Game *g, int level_num, int *out_vx, int *out_vy);
 static void deactivate_current_option(Game *g);
 static void inc_score(Game *g, int owner, int ecx);
 static void dec_score(Game *g, int owner, int ecx);
 static void detect_collision_cursor(Game *g);
 static void teleport_ball_random(Game *g, Ball *b);
+
+/* The ASM position-retry loops (@@ag3 in create_ball, Teleporte_Ball) retry
+ * forever; we cap to stay deterministic if a level walls the target area in.
+ * Shared by teleport_ball_random and create_ball_asm. */
+#define TELEPORT_RETRIES_CAP 64
 
 /* P1-ASM-34: Time_Between_Option per-difficulty spacing, read from cfg if
  * set by game_set_powerup_spacing(), falling back to DELAI_BETWEEN_OPTION.
@@ -100,6 +106,23 @@ void game_set_monster_delai(Game *g, const int delai_per_diff[3]) {
     }
 }
 
+/* Iter3-H: accept per-difficulty Nbs_Change_Speed_Level overrides from
+ * Blaster.cfg:45 (2,3,3). FILE.ASM:1001-1005 overwrites the compiled-in
+ * change_speed_level_easy/medium/hard at cfg load. Mirrors
+ * game_set_powerup_spacing. */
+void game_set_change_speed(Game *g, const int cs[3]) {
+    if (!g) return;
+    if (cs) {
+        g->cfg_change_speed[0] = cs[0];
+        g->cfg_change_speed[1] = cs[1];
+        g->cfg_change_speed[2] = cs[2];
+    } else {
+        g->cfg_change_speed[0] = 0;
+        g->cfg_change_speed[1] = 0;
+        g->cfg_change_speed[2] = 0;
+    }
+}
+
 /* F6-01: inject per-powerup per-difficulty spawn frequencies from Blaster.cfg
  * Freq_Option_*. ASM cite: FILE.ASM:965-973 overwrites the struc_options
  * option_easy/medium/hard fields read by MAIN.ASM:5493-5504 random_options. */
@@ -123,16 +146,15 @@ void game_set_powerup_freq(Game *g, const int freq[POWERUP_COUNT][3]) {
 /* F6-01: pick a random powerup using the cfg-injected freq table if set,
  * else fall back to powerup.c's hardcoded powerup_freq_table[]. Mirrors
  * the full random_options loop (MAIN.ASM:5472-5513):
- *   - rand idx in [0..POWERUP_COUNT-2] (COLLISION excluded)
+ *   - get_random(options_number-1) → idx in [0..POWERUP_COUNT-1] INCLUSIVE
+ *     (get_random MAIN.ASM:5103-5127 masks then rejects results > N, so it
+ *     returns 0..N inclusive; COLLISION idx 23 IS in the pool — its
+ *     option_status gate at MAIN.ASM:5482-5483 keeps it out of solo play)
  *   - look up freq[idx][diff_idx]
  *   - freq==1 → always spawn; freq==0 → no spawn; freq>=2 → spawn iff
- *     get_random(freq-1)==0, i.e. 1/(freq-1) probability.
- * Returns POWERUP_COUNT on "no spawn".
- *
- * Note on probability math: in the ASM, freq is the raw Freq_Option value.
- * For Blaster.cfg freq=N, the spawn probability is 1/(N-1) per call — e.g.
- * Freq_Option_3_ball=(2,3,4) → 1/1, 1/2, 1/3 easy/med/hard. This matches
- * the intuition that the cfg comment "0-10" encodes "rarer as N grows". */
+ *     get_random(freq-1)==0 — get_random(freq-1) yields freq values
+ *     (0..freq-1 inclusive), i.e. 1/freq probability.
+ * Returns POWERUP_COUNT on "no spawn". */
 static PowerupType pick_powerup_cfg(const Game *g) {
     int diff_idx;
     switch (g->difficulty) {
@@ -156,16 +178,27 @@ static PowerupType pick_powerup_cfg(const Game *g) {
     }
     if (!has_override) return powerup_random_type(g->difficulty);
 
-    /* MAIN.ASM:5473 mov eax,options_number-1 → 0..POWERUP_COUNT-2 (COLLISION excluded). */
-    int idx = rand() % (POWERUP_COUNT - 1);
+    /* MAIN.ASM:5472-5477 @@again index draw + last_random reroll — shared
+     * helper (powerup.c) so both cfg and table paths update the single
+     * last_random global.  Draw covers all 24 entries, COLLISION included. */
+    int idx = powerup_draw_index();
+
+    /* MAIN.ASM:5482-5483  cmp [eax.option_status],Off / je @@end — an option
+     * whose status is Off is skipped.  COLLISION is the only entry left Off by
+     * default; MAIN.ASM:5443-5446 turns it On solely when nbs_player == 2.
+     * Now that the draw covers index 23, solo play must reject it explicitly. */
+    if (idx == POWERUP_COLLISION && g->game_mode == 0) return (PowerupType)POWERUP_COUNT;
+
     int freq = g->cfg_freq_option[idx][diff_idx];
 
     /* MAIN.ASM:5506 cmp eax,1 je @@forced */
     if (freq == 1) return (PowerupType)idx;
     /* MAIN.ASM:5508 cmp eax,Off je @@again — here we return "no spawn". */
     if (freq <= 0) return (PowerupType)POWERUP_COUNT;
-    /* MAIN.ASM:5510-5513 dec eax; call get_random; or eax,eax; jnz @@end. */
-    int roll = rand() % (freq - 1 > 0 ? freq - 1 : 1);
+    /* MAIN.ASM:5510-5513 dec eax; call get_random; or eax,eax; jnz @@end —
+     * get_random(freq-1) is 0..freq-1 INCLUSIVE (freq values), spawn iff 0,
+     * i.e. probability 1/freq. */
+    int roll = asm_get_random(freq - 1);
     if (roll != 0) return (PowerupType)POWERUP_COUNT;
     return (PowerupType)idx;
 }
@@ -278,10 +311,21 @@ static int speed_start(Difficulty diff) {
 }
 
 /* Divisor for per-level speed boost at launch.
- * MAIN.ASM:5296-5307  mov ecx,change_speed_level_*  FILE.ASM:1134-1136 */
-static int change_speed_divisor(Difficulty diff) {
-    if (diff == DIFFICULTY_HARD)   return CHANGE_SPEED_HARD;
-    if (diff == DIFFICULTY_MEDIUM) return CHANGE_SPEED_MEDIUM;
+ * MAIN.ASM:5296-5307  mov ecx,change_speed_level_*  FILE.ASM:1134-1136.
+ * Iter3-H: Blaster.cfg:45 Nbs_Change_Speed_Level (2,3,3) overwrites the
+ * compiled-in 3/4/4 at cfg load (FILE.ASM:1001-1005) — honour values
+ * injected via game_set_change_speed, fall back to the macros. */
+static int change_speed_divisor(const Game *g) {
+    int idx;
+    switch (g->difficulty) {
+        case DIFFICULTY_EASY:   idx = 0; break;
+        case DIFFICULTY_HARD:   idx = 2; break;
+        case DIFFICULTY_MEDIUM:
+        default:                idx = 1; break;
+    }
+    if (g->cfg_change_speed[idx] > 0) return g->cfg_change_speed[idx];
+    if (g->difficulty == DIFFICULTY_HARD)   return CHANGE_SPEED_HARD;
+    if (g->difficulty == DIFFICULTY_MEDIUM) return CHANGE_SPEED_MEDIUM;
     return CHANGE_SPEED_EASY;
 }
 
@@ -309,16 +353,23 @@ static int compute_speed_level(int level_num) {
  *   add ball_1.sprite_sens_x,eax
  *   sub ball_1.sprite_sens_y,eax
  *
- * level_number = total levels in file = LEVELS_PER_FILE = 80
+ * level_number = PLAYABLE level count, computed at boot by
+ * search_level_number (MAIN.ASM:5025-5041): counts levels until the first
+ * 0xFF byte — 40 for the three shipped worlds, NOT the file capacity of 80.
  */
-static void compute_launch_velocity(Difficulty diff, int level_num, int *out_vx, int *out_vy) {
+static void compute_launch_velocity(const Game *g, int level_num, int *out_vx, int *out_vy) {
+    Difficulty diff = g->difficulty;
     int spd   = speed_start(diff);               /* MAIN.ASM:5295  eax = speed_start */
-    int cdiv  = change_speed_divisor(diff);       /* MAIN.ASM:5296  ecx = change_speed_divisor */
+    int cdiv  = change_speed_divisor(g);          /* MAIN.ASM:5296  ecx = change_speed_level_* (cfg-injected, Iter3-H) */
     int vx    = spd;                             /* MAIN.ASM:5330  ball_1.sprite_sens_x = eax */
     int vy    = -(spd + 1);                      /* MAIN.ASM:5331-5333  inc eax; neg eax → vy */
 
-    /* Per-level boost: MAIN.ASM:5335-5343 */
-    int lvl_div = LEVELS_PER_FILE / cdiv;        /* level_number/cdiv  (integer div) */
+    /* Per-level boost: MAIN.ASM:5335-5343 — divides by level_number (the
+     * real 0xFF-terminated count from search_level_number), with a fallback
+     * to the file capacity if level_count() cannot answer. */
+    int nb_levels = level_count(g->world);
+    if (nb_levels <= 0) nb_levels = LEVELS_PER_FILE;
+    int lvl_div = nb_levels / cdiv;              /* level_number/cdiv  (integer div) */
     if (lvl_div < 1) lvl_div = 1;
     int boost = level_num / lvl_div;             /* current_level/lvl_div */
     vx += boost;                                 /* MAIN.ASM:5342  add ball_1.sprite_sens_x,eax */
@@ -605,6 +656,21 @@ void game_spawn_ball(Game *g) {
         g->balls[1].owner = 1;   /* P2 */
         g->ball_count = 2;
     }
+
+    /* Attract mode launches the ball itself — it never waits for a fire press.
+     * MAIN.ASM:2761-2771  @@demo:
+     *     mov ball_1.sprite_status,On / sens_x,+3 / sens_y,-4
+     *     cmp nbs_player,2 / jne @@end
+     *     mov ball_2.sprite_status,On / sens_x,-3 / sens_y,-4
+     * The ball is live (status On), so it must not stay stuck to the paddle. */
+    if (g->demo_active) {
+        ball_set_velocity(&g->balls[0], 3, -4);
+        g->balls[0].is_magnetic = 0;
+        if (g->ball_count > 1) {
+            ball_set_velocity(&g->balls[1], -3, -4);
+            g->balls[1].is_magnetic = 0;
+        }
+    }
     SPAWN_LOG(g, "game_spawn_ball: level=%d game_mode=%d -> bc=%d",
               g->level_num, g->game_mode, g->ball_count);
 
@@ -654,7 +720,6 @@ int game_level_complete(const Game *g) {
  * or when the player loses a life.
  * -------------------------------------------------------------------------- */
 static void deactivate_current_option(Game *g) {
-    int i;
     /* P1-ASM-31: MAIN.ASM:6322 play_sound iff_option_off — but only when
      * there is a timed effect to clear. Guard against no-op calls (called
      * by apply_powerup / game_load_level even when nothing is active). */
@@ -662,28 +727,19 @@ static void deactivate_current_option(Game *g) {
     if (had_option && g->audio) audio_play(g->audio, SFX_POWERUP_OFF);
 
     switch (g->current_option) {
-    case POWERUP_IRON_BALL:
-        g->iron_active = 0;
-        for (i = 0; i < g->ball_count; i++) g->balls[i].is_iron = 0;
-        break;
-    case POWERUP_MAGNETIC:
-        /* MAIN.ASM:6322 (iff_option_off) clears magnetic_flag via reset_magnetic
-         * which sets sprite_magnetic=Off on all balls (MAIN.ASM:3299-3313). */
-        g->magnetic_flag = 0;
-        for (i = 0; i < g->ball_count; i++) {
-            /* P1-ASM-11: magnetic catch preserved vx/vy — on deactivate the
-             * ball simply resumes moving with its retained velocity (MAIN.ASM
-             * move_ball falls through to @@ok when sprite_magnetic==Off). */
-            g->balls[i].is_magnetic = 0;
-        }
-        break;
-    case POWERUP_GHOST:
-        g->ghost_active = 0;
-        /* Remove any remaining ghost balls when powerup expires */
-        for (i = 0; i < g->ball_count; i++) {
-            if (g->balls[i].is_ghost) g->balls[i].active = 0;
-        }
-        break;
+    /* No POWERUP_MAGNETIC case: magnetic never occupies current_option
+     * (option_magnetic_p restores old_option, MAIN.ASM:6745-6750). Its
+     * expiry is the unconditional `call reset_magnetic` on shared-timer
+     * expiry (MAIN.ASM:6321-6323), mirrored in tick_option_timer.
+     *
+     * Iter3-A: no POWERUP_IRON_BALL / POWERUP_GHOST cases either — those
+     * never occupy the slot (apply_powerup clears it immediately, mirroring
+     * @@reset_current_option MAIN.ASM:2884-2899 and option_ghost_p
+     * MAIN.ASM:6786-6788). The ASM expiry @@current_option_off
+     * (MAIN.ASM:6321-6327) is sound + reset_magnetic + init_palette ONLY:
+     * it never restores sprite_rebond (iron stays per ball until the ball
+     * is lost, MAIN.ASM:2844-2846) and never kills ghost balls (they pop
+     * on paddle contact only, MAIN.ASM:4207-4209). */
     case POWERUP_COLLISION:
         /* collision_flag is only consulted while current_option ==
          * POWERUP_COLLISION, but reset for hygiene.  Paddle bounds are
@@ -710,60 +766,118 @@ static void deactivate_current_option(Game *g) {
 }
 
 /* --------------------------------------------------------------------------
- * Internal: spawn extra balls from paddle centre.
- * MAIN.ASM:option_3_ball_p / option_6_ball_p / option_9_ball_p / option_20_ball_p
- * All four handlers share the same logic — only the count differs.
+ * asm_random_speed — MAIN.ASM:1648-1687 Random_Speed, verbatim.
+ *
+ *   mov eax,2 / call get_random / add eax,2  → sens_x = 2..4 (draw inclusive)
+ *   inc eax                                  → sens_y = sens_x + 1 = 3..5
+ * then four coin flips (mov eax,1 / call get_random / or eax,eax / jz skip):
+ *   flip 1 (MAIN.ASM:1658-1662): dec sens_x
+ *   flip 2 (MAIN.ASM:1665-1671): inc sens_x, dec sens_y, sprite_angle = 1
+ *   flip 3 (MAIN.ASM:1674-1679): neg sens_x
+ *   flip 4 (MAIN.ASM:1683-1687): neg sens_y
+ * Five generator draws per call, always — count matters for stream parity.
+ * The ASM does not touch sprite_angle when flip 2 misses; callers reach this
+ * right after init_ball/ball_init, which starts angle at 0.
+ * -------------------------------------------------------------------------- */
+static void asm_random_speed(Ball *b) {
+    b->vx = asm_get_random(2) + 2;          /* MAIN.ASM:1651-1653 */
+    b->vy = b->vx + 1;                      /* MAIN.ASM:1654-1655 */
+    if (asm_get_random(1)) b->vx -= 1;      /* MAIN.ASM:1658-1662 */
+    if (asm_get_random(1)) {                /* MAIN.ASM:1665-1671 */
+        b->vx += 1;
+        b->vy -= 1;
+        b->angle = 1;
+    }
+    if (asm_get_random(1)) b->vx = -b->vx;  /* MAIN.ASM:1674-1679 */
+    if (asm_get_random(1)) b->vy = -b->vy;  /* MAIN.ASM:1683-1687 */
+}
+
+/* --------------------------------------------------------------------------
+ * Internal: spawn extra balls — MAIN.ASM:1567-1583 add_ball, each new ball
+ * initialised by MAIN.ASM:1588-1645 create_ball:
+ *   - random velocity via Random_Speed, then sens_y forced negative
+ *     (MAIN.ASM:1597-1601  cmp sens_y,0 / js @@ok / neg) so the ball departs
+ *     upward with a RANDOM direction — not a deterministic fan;
+ *   - random position across the owner's paddle:
+ *       x = paddle_x + ball_size + get_random(paddle_w - 2*ball_size)
+ *         (MAIN.ASM:1605-1611)
+ *       y = paddle_y + get_random(paddle_h) - ball_size - paddle_h
+ *         (MAIN.ASM:1613-1619)  — i.e. inside the band just above the paddle;
+ *   - the four ball corners probed against incassable bricks, redrawing BOTH
+ *     coordinates on any hit (MAIN.ASM:1621-1639 @@ag3, Test_Random_Pos).
+ *     The probes use the full sprite size as offset (esi/edi = size_x/size_y),
+ *     matching the ASM one-past corners. Retries consume generator draws.
  * owner: 0=P1, 1=P2 — spawn at owner's paddle, tag balls with owner so
  * brick kills and lost-ball lives attribute correctly in duel mode.
  * -------------------------------------------------------------------------- */
+/* Exact Test_Random_Pos (MAIN.ASM:1695-1726) for create_ball's probes.
+ * NOT teleport_corner_blocked: that helper rejects y >= PLAY_W outright,
+ * but the brick grid is 30 rows deep (nbs_brique_y, Blaster.inc:454) so the
+ * ASM probe at y == PLAY_W (row 26) is a legitimate in-grid read that
+ * virtually always passes — rejecting it would burn a spurious redraw
+ * (and its generator draws) on ~1/(paddle_h+1) of spawns.  The ASM has no
+ * bounds check at all; row 26 x col 13 keeps idx < BRICK_COUNT for every
+ * reachable probe, the idx guard below is a memory guard only. */
+static int create_ball_corner_blocked(Game *g, int x, int y) {
+    int row = (y - PLAY_Y1) >> 4;           /* sub eax,bord_y / shr eax,4    */
+    int col = (x - PLAY_X1) >> 5;           /* sub ebx,bord_x / shr ebx,5    */
+    int idx = row * BRICK_COLS + col;       /* imul eax,nbs_brique_x / add   */
+    if (idx < 0 || idx >= BRICK_COUNT) return 0;
+    if (!g->bricks[idx].active) return 0;
+    /* MAIN.ASM:1722  cmp al,incassable; je @@bad — only exact 0x08 fails. */
+    return (g->bricks[idx].type == BRICK_INDESTRUCTIBLE) ? 1 : 0;
+}
+
+static void create_ball_asm(Game *g, Ball *b, const Paddle *p, int owner) {
+    int px = 0, py = 0, tries;
+    ball_init(b, 0, 0);                     /* MAIN.ASM:1594  call init_ball  */
+    asm_random_speed(b);                    /* MAIN.ASM:1595  call random_speed */
+    if (b->vy > 0) b->vy = -b->vy;          /* MAIN.ASM:1597-1601 force upward */
+    /* @@ag3 position loop — the ASM retries forever; cap like
+     * teleport_ball_random to stay deterministic on a walled-in level. */
+    for (tries = 0; tries < TELEPORT_RETRIES_CAP; tries++) {
+        px = p->x + BALL_W + asm_get_random(p->w - BALL_W - BALL_W);
+        py = p->y + asm_get_random(p->h) - BALL_H - p->h;
+        /* MAIN.ASM:1621-1639 — (esi,edi) = (0,0),(size_y,0),(0,size_x),
+         * (size_y,size_x); esi adds to pos_y, edi to pos_x. */
+        if (!create_ball_corner_blocked(g, px,          py         ) &&
+            !create_ball_corner_blocked(g, px,          py + BALL_H) &&
+            !create_ball_corner_blocked(g, px + BALL_W, py         ) &&
+            !create_ball_corner_blocked(g, px + BALL_W, py + BALL_H)) break;
+    }
+    b->x = px;
+    b->y = py;
+    b->prev_x = px;
+    b->prev_y = py;
+    b->is_magnetic = 0;   /* extra balls fly immediately, never attached */
+    b->owner = owner;
+}
+
 static void spawn_extra_balls(Game *g, int count, int owner) {
-    int vx, vy;
     Paddle *owner_paddle = (g->game_mode > 0 && owner == 1) ? &g->paddle_2 : &g->paddle;
     int _bc_before = g->ball_count;
 
     /* Iter 2 fix #8: MAIN.ASM:1567-1583 add_ball reuses inactive slots FIRST,
      * only appending to the end when no gap is available. Scan [0, ball_count)
-     * for inactive slots, then fall through to appending.
-     * `batch_idx` tracks position within this spawn batch so the fan spread
-     * (vx offset) remains identical to before. */
+     * for inactive slots, then fall through to appending. */
     int spawned = 0;
-    int batch_idx = 0;
     int reused = 0;
     int appended = 0;
 
     /* Pass 1: reuse gaps */
     for (int slot = 0; slot < g->ball_count && spawned < count; slot++) {
         if (g->balls[slot].active) continue;
-        ball_init(&g->balls[slot],
-                  owner_paddle->x + owner_paddle->w / 2 - BALL_W / 2,
-                  owner_paddle->y - BALL_H);
-        compute_launch_velocity(g->difficulty, g->level_num, &vx, &vy);
-        vx += batch_idx - count / 2;
-        ball_set_velocity(&g->balls[slot], vx, vy);
-        ball_clamp_speed(&g->balls[slot]);
-        g->balls[slot].is_magnetic = 0;
-        g->balls[slot].owner = owner;
+        create_ball_asm(g, &g->balls[slot], owner_paddle, owner);
         spawned++;
-        batch_idx++;
         reused++;
     }
 
     /* Pass 2: append until count reached or array is full */
     int end_cap = BALL_MAX + 1;
     while (spawned < count && g->ball_count < end_cap) {
-        int slot = g->ball_count;
-        ball_init(&g->balls[slot],
-                  owner_paddle->x + owner_paddle->w / 2 - BALL_W / 2,
-                  owner_paddle->y - BALL_H);
-        compute_launch_velocity(g->difficulty, g->level_num, &vx, &vy);
-        vx += batch_idx - count / 2;
-        ball_set_velocity(&g->balls[slot], vx, vy);
-        ball_clamp_speed(&g->balls[slot]);
-        g->balls[slot].is_magnetic = 0;
-        g->balls[slot].owner = owner;
+        create_ball_asm(g, &g->balls[g->ball_count], owner_paddle, owner);
         g->ball_count++;
         spawned++;
-        batch_idx++;
         appended++;
     }
     SPAWN_LOG(g, "spawn_extra: requested=%d owner=%d reused=%d appended=%d lost=%d bc %d->%d",
@@ -920,19 +1034,59 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * Timed: ball state powerups
      * ------------------------------------------------------------------ */
     case POWERUP_SLOW_BALL:
-        /* MAIN.ASM:option_slow_ball_p — just ret (no immediate speed change).
-         * Ongoing deceleration is applied every frame via tick_speed_counter
-         * while current_option == SLOW_BALL (detect_dec_speed equivalent). */
-        g->current_option = type;
-        g->current_option_count = (duration > 0) ? duration : DELAI_OPTION;
+        /* ONE-SHOT: option_slow_ball_p is an empty handler (MAIN.ASM:6613-6616
+         * just ret). The effect is detect_dec_speed (MAIN.ASM:3412-3423)
+         * applying ONE dec_speed_x/dec_speed_y per ball during the single
+         * Refresh_Ball pass where current_option is still set — the end of
+         * that same pass resets current_option to Off (MAIN.ASM:2885-2899
+         * @@reset_current_option includes option_slow_ball_o). One pastille
+         * = one speed step per ball, not a ramp. */
+        for (i = 0; i < g->ball_count; i++) {
+            if (!g->balls[i].active) continue;
+            /* MAIN.ASM:3417-3418 mov [edx.sprite_speed_counter],speed_level */
+            g->balls[i].speed_counter = g->speed_level * 3;  /* 60fps scaling */
+            {
+                /* dec_speed_x: MAIN.ASM:3460-3475 */
+                int min_x = SPEED_MIN_X + g->balls[i].angle;
+                if (g->balls[i].vx > min_x)       g->balls[i].vx--;
+                else if (g->balls[i].vx < -min_x) g->balls[i].vx++;
+            }
+            {
+                /* dec_speed_y: MAIN.ASM:3479-3493 */
+                int min_y = SPEED_MIN_Y - g->balls[i].angle;
+                if (g->balls[i].vy > min_y)       g->balls[i].vy--;
+                else if (g->balls[i].vy < -min_y) g->balls[i].vy++;
+            }
+        }
         if (g->audio) audio_play(g->audio, SFX_SPEEDUP);
         break;
     case POWERUP_FAST_BALL:
-        /* MAIN.ASM:option_fast_ball_p — just ret (no immediate speed change).
-         * Ongoing acceleration is applied every frame via tick_speed_counter
-         * while current_option == FAST_BALL (detect_inc_speed equivalent). */
-        g->current_option = type;
-        g->current_option_count = (duration > 0) ? duration : DELAI_OPTION;
+        /* ONE-SHOT: option_fast_ball_p is an empty handler (MAIN.ASM:6620-6623
+         * just ret). The effect is detect_inc_speed (MAIN.ASM:3396-3402)
+         * applying ONE inc_speed_x/inc_speed_y per ball during the single
+         * Refresh_Ball pass where current_option is still set — reset to Off
+         * at end of that pass (MAIN.ASM:2885-2899). */
+        for (i = 0; i < g->ball_count; i++) {
+            if (!g->balls[i].active) continue;
+            /* MAIN.ASM:3399-3400 mov [edx.sprite_speed_counter],speed_level */
+            g->balls[i].speed_counter = g->speed_level * 3;  /* 60fps scaling */
+            {
+                /* inc_speed_x: MAIN.ASM:3427-3441 clamp at speed_max_x+angle */
+                int lim_x = SPEED_MAX_X + g->balls[i].angle;
+                if (g->balls[i].vx > 0 && g->balls[i].vx < lim_x)
+                    g->balls[i].vx++;
+                else if (g->balls[i].vx < 0 && g->balls[i].vx > -lim_x)
+                    g->balls[i].vx--;
+            }
+            {
+                /* inc_speed_y: clamp at speed_max_y-angle */
+                int lim_y = SPEED_MAX_Y - g->balls[i].angle;
+                if (g->balls[i].vy > 0 && g->balls[i].vy < lim_y)
+                    g->balls[i].vy++;
+                else if (g->balls[i].vy < 0 && g->balls[i].vy > -lim_y)
+                    g->balls[i].vy--;
+            }
+        }
         if (g->audio) audio_play(g->audio, SFX_SPEEDUP);
         break;
     case POWERUP_IRON_BALL:
@@ -954,9 +1108,16 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
          *
          * Iter 2 fix #9: MAIN.ASM:6745-6750 push/pop old current_option across
          * this handler — magnetic does NOT occupy the global current_option
-         * slot; any previously active timed option keeps running. Only set
-         * the magnetic_flag bit. */
+         * slot; any previously active timed option keeps running.
+         *
+         * BUT the shared pipeline (MAIN.ASM:5691 detect_prise_option) has
+         * already set current_option_count=DELAI_OPTION before the handler
+         * runs, and option_magnetic_p restores only current_option — NOT the
+         * count. So a magnetic pickup (re)arms the shared 600-frame timer,
+         * whose expiry calls reset_magnetic (MAIN.ASM:6321-6323) — that is
+         * how magnetic expires in the ASM. Mirror both halves. */
         g->magnetic_flag |= (collected_by == 1) ? PLAYER_TWO : PLAYER_ONE;
+        g->current_option_count = DELAI_OPTION;   /* MAIN.ASM:5691 */
         break;
     case POWERUP_GHOST:
         /* MAIN.ASM:6776-6790  option_ghost_p:
@@ -979,7 +1140,7 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
                 ball_init(&g->balls[i],
                           owner_paddle->x + owner_paddle->w / 2 - BALL_W / 2,
                           owner_paddle->y - BALL_H);
-                compute_launch_velocity(g->difficulty, g->level_num, &vx, &vy);
+                compute_launch_velocity(g, g->level_num, &vx, &vy);
                 /* Spread ghost balls in different directions */
                 int spread = (i - start) - ghost_count / 2;
                 vx += spread;
@@ -1088,9 +1249,12 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         monster_destroy_all(g->monsters, g->audio);
         break;
     case POWERUP_ADD_MONSTER:
-        monster_create(g->monsters, &g->monster_spawn_counter, g->difficulty,
-                       g->cfg_monster_delai);
-        g->monster_spawn_counter = 0;  /* reset so timer doesn't double-spawn */
+        /* MAIN.ASM:6765-6768 option_add_monster_p: `call add_monster` —
+         * immediate spawn, NO counter gate (Create_Monster's counter check
+         * at MAIN.ASM:2969-2971 is bypassed). Add_Monster itself resets
+         * counter_monster (MAIN.ASM:2981), mirrored inside monster_add_now. */
+        monster_add_now(g->monsters, &g->monster_spawn_counter, g->difficulty,
+                        g->cfg_monster_delai);
         break;
 
     /* COLLISION: 2P effect (coop + duel) — locks the two cursors so they
@@ -1134,6 +1298,30 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
     if (type != POWERUP_MAGNETIC && type != POWERUP_NIGHT) {
         g->current_option = type;
         g->current_option_count = DELAI_OPTION;
+    }
+
+    /* Iter3-A: five options leave the current_option slot within the same
+     * frame that collected them, so they must NOT sit in the slot here:
+     *   - @@reset_current_option (MAIN.ASM:2884-2899) writes current_option=Off
+     *     at the end of the Refresh_Ball pass for option_iron_ball_o,
+     *     option_telepod_o, option_fast_ball_o and option_slow_ball_o;
+     *   - option_ghost_p ends with `mov current_option,Off` (MAIN.ASM:6786-6788).
+     * Their one-shot effect was applied in the switch above. The shared count
+     * stays armed (detect_prise_option, MAIN.ASM:5691) — its expiry
+     * @@current_option_off (MAIN.ASM:6321-6327) only plays the off sound,
+     * calls reset_magnetic and restores the palette: it neither restores
+     * sprite_rebond (iron is permanent per ball, MAIN.ASM:2844-2846) nor
+     * removes ghost balls (they only pop on paddle contact, MAIN.ASM:4207-4209). */
+    if (type == POWERUP_IRON_BALL || type == POWERUP_TELEPOD ||
+        type == POWERUP_FAST_BALL || type == POWERUP_SLOW_BALL ||
+        type == POWERUP_GHOST) {
+        /* detect_init_palette (MAIN.ASM:6667-6677) still sees the transient
+         * current_option on the NEXT frame for the four Refresh_Ball options
+         * (pickup happens after the palette check in the ASM loop) and ends
+         * night early. Ghost's handler resets to Off in the same call, before
+         * detect_init_palette can see it — night survives a ghost pickup. */
+        if (type != POWERUP_GHOST) g->night_active = 0;
+        g->current_option = POWERUP_COUNT;
     }
 
     (void)duration;  /* suppress warning if unused by a path */
@@ -1198,6 +1386,23 @@ static void tick_option_timer(Game *g) {
     /* Timer expired — deactivate the timed powerup effect.
      * MAIN.ASM:6295-6336  sets current_option=Off and restores defaults.
      * Also clears night_active (init_palette, MAIN.ASM:6327 → 6684). */
+
+    /* MAIN.ASM:6321-6323 @@current_option_off: play_sound iff_option_off
+     * then `call reset_magnetic` — UNCONDITIONALLY on shared-timer expiry.
+     * reset_magnetic (MAIN.ASM:3299-3313) clears sprite_magnetic on every
+     * ball and magnetic_flag. Magnetic never occupies current_option (its
+     * handler restores old_option, MAIN.ASM:6745-6750), so it expires via
+     * this path only. */
+    if (g->magnetic_flag) {
+        int j;
+        /* If magnetic was the only effect (current_option slot empty),
+         * deactivate_current_option below would skip iff_option_off —
+         * the ASM plays it on every @@current_option_off pass. */
+        if (g->current_option == POWERUP_COUNT && g->audio)
+            audio_play(g->audio, SFX_POWERUP_OFF);
+        g->magnetic_flag = 0;
+        for (j = 0; j < g->ball_count; j++) g->balls[j].is_magnetic = 0;
+    }
     deactivate_current_option(g);
 }
 
@@ -1216,6 +1421,14 @@ static void handle_life_lost(Game *g) {
     int p1_lost = g->p1_ball_lost_pending;
     int p2_lost = g->p2_ball_lost_pending;
 
+    /* Iter3-G: no double KO in duel. detect_game_over_player_2
+     * (MAIN.ASM:4638-4646) opens with `cmp game_mode,PLAYING / jne @@end`:
+     * once P1's loss went through test_game_over (which leaves PLAYING for
+     * READY_TO_PLAY_AGAIN or GAME_OVER, MAIN.ASM:4678/4695), P2's counter is
+     * never decremented that frame — there is always a survivor. P1 is
+     * checked first (MAIN.ASM:1088-1090 call order), so P1's loss wins. */
+    if (g->game_mode == 2 && p1_lost && p2_lost) p2_lost = 0;
+
     /* Fallback: if no pending flags set (e.g. initial state), treat as P1.
      * Also ensure there is at least one decrement. */
     if (!p1_lost && !p2_lost) p1_lost = 1;
@@ -1229,10 +1442,14 @@ static void handle_life_lost(Game *g) {
      * Iter 2 fix #5: magnetic_flag is NOT cleared here — MAIN.ASM:4669-4672
      * test_game_over does not touch magnetic_flag; _Init_Cursor PUSH/POP
      * preserves it. Combined with fix #9 (magnetic never occupies
-     * current_option), the magnetic effect SURVIVES life-lost. It is only
-     * reset on full game_init (line ~334) or level advance. */
+     * current_option), the magnetic effect SURVIVES life-lost. It is reset
+     * on full game_init, level advance, or shared-timer expiry
+     * (reset_magnetic, MAIN.ASM:6321-6323 — see tick_option_timer). */
     deactivate_current_option(g);
     g->ghost_active = 0;  /* ghost is instant, not tracked via current_option */
+    g->iron_active  = 0;  /* Iter3-A: iron never occupies the slot either; the
+                           * respawned balls get rebond back via ball_init (ASM
+                           * init_start_game re-inits the sprites). */
     g->pickup_text_timer = 0;  /* hide any lingering pickup banner */
 
     /* Per-paddle laser/size/reverse state — cleared on the losing paddle only
@@ -1273,7 +1490,11 @@ static void handle_life_lost(Game *g) {
     int game_over;
     if (g->game_mode == 0)       game_over = p1_dead;            /* solo */
     else if (g->game_mode == 1)  game_over = p1_dead;            /* coop — shared counter */
-    else /* game_mode == 2 */    game_over = p1_dead && p2_dead; /* dual — both out */
+    else /* game_mode == 2 */    game_over = p1_dead || p2_dead; /* dual — FIRST player out
+        * ends the match: test_game_over (MAIN.ASM:4674-4678) does
+        * `dec [ebp.player_nbs_ball] / cmp -1 / jne @@cont` then
+        * `mov game_mode,GAME_OVER` with NO dual_flag test — the survivor
+        * (lives >= 0) is the winner (main.c derives it from lives). */
 
     if (game_over) {
         /* MAIN.ASM:4678  mov game_mode,GAME_OVER */
@@ -1330,39 +1551,15 @@ static void handle_life_lost(Game *g) {
  *   3399  mov sprite_speed_counter,speed_level  — reset counter
  *   3401  call inc_speed_x; call inc_speed_y    — apply speed increase
  *
- * Key: speed only auto-applies when (counter hits 0) OR (fast_ball powerup active).
- * With fast_ball: applied every ASM frame. Original game ran at ~18fps; this port
- * runs at 60fps, so fast/slow ball changes are rate-limited to every 3 frames to
- * preserve the original feel (60/18 ≈ 3).
- * detect_dec_speed (MAIN.ASM:3410-3421): same logic but decrement, for slow_ball.
+ * FAST/SLOW ball are NOT handled here: their handlers are empty
+ * (MAIN.ASM:6613-6623 option_slow_ball_p / option_fast_ball_p just ret) and
+ * current_option is reset to Off at the end of the very Refresh_Ball pass
+ * that collected them (MAIN.ASM:2885-2899 @@reset_current_option) — the
+ * effect is a single ±1 speed step per ball, applied at pickup in
+ * apply_powerup. Only the natural counter-driven speedup lives here.
  * -------------------------------------------------------------------------- */
 static void tick_speed_counter(Game *g) {
     int i;
-
-    /* MAIN.ASM:detect_dec_speed:3410-3421 — slow_ball: decelerate every ASM
-     * frame. Rate-limited to every 3 frames to match 60fps / 18fps ratio.
-     * Also reset per-ball speed_counter (MAIN.ASM:3418 mov [edx.sprite_speed_counter],eax). */
-    if (g->current_option == POWERUP_SLOW_BALL && (g->frame % 3) == 0) {
-        for (i = 0; i < g->ball_count; i++) {
-            if (!g->balls[i].active) continue;
-            g->balls[i].speed_counter = g->speed_level * 3;  /* F1-C per-ball */
-            {
-                /* dec_speed_x: MAIN.ASM:3460-3475 */
-                int min_x = SPEED_MIN_X + g->balls[i].angle;
-                if (g->balls[i].vx > min_x)       g->balls[i].vx--;
-                else if (g->balls[i].vx < -min_x) g->balls[i].vx++;
-            }
-            {
-                /* dec_speed_y: MAIN.ASM:3479-3493 */
-                int min_y = SPEED_MIN_Y - g->balls[i].angle;
-                if (g->balls[i].vy > min_y)        g->balls[i].vy--;
-                else if (g->balls[i].vy < -min_y)  g->balls[i].vy++;
-            }
-        }
-        /* Keep global mirror in sync for UI/debug. */
-        g->speed_counter = g->speed_level * 3;
-        return;
-    }
 
     /* F1-C: Per-ball auto-speedup counter (MAIN.ASM:3388-3394):
      *   for each ball: if sens_y<0 (moving up), dec speed_counter;
@@ -1370,14 +1567,6 @@ static void tick_speed_counter(Game *g) {
      *                  and reset counter to speed_level.
      * This is the ASM-faithful per-ball cadence — previously we used one
      * global counter which coupled multi-ball speed-up timing. */
-    int fast_active = (g->current_option == POWERUP_FAST_BALL);
-    int fast_cap_x = fast_active ? (SPEED_MAX_X / 2) : 0;
-    int fast_cap_y = fast_active ? (SPEED_MAX_Y / 2) : 0;
-    /* MAIN.ASM:3395-3397 @@cont: check fast_ball powerup. If active, apply
-     * every frame (sub-sampled to every 32 here for playability — 60fps
-     * would reach SPEED_MAX in <1s otherwise). */
-    int fast_pulse = (fast_active && (g->frame % 32) == 0);
-
     for (i = 0; i < g->ball_count; i++) {
         if (!g->balls[i].active) continue;
         /* F1-C lazy seed: ball_init sets speed_counter=0 (doesn't know
@@ -1388,8 +1577,6 @@ static void tick_speed_counter(Game *g) {
             g->balls[i].speed_counter = g->speed_level * 3;
         }
         int apply = 0;
-        int natural_tick = 0;  /* MAIN.ASM:3407-3409 plays iff_speed_up only
-                                 * on the counter-expiry branch (not fast_ball). */
         /* MAIN.ASM:3390-3394 per-ball decrement gate. */
         if (g->balls[i].vy < 0) {
             /* If ctr is still 0 (never seeded) seed with speed_level*3 before
@@ -1399,15 +1586,13 @@ static void tick_speed_counter(Game *g) {
                 g->balls[i].speed_counter = g->speed_level * 3;
             }
             g->balls[i].speed_counter--;
-            if (g->balls[i].speed_counter <= 0) { apply = 1; natural_tick = 1; }
+            if (g->balls[i].speed_counter <= 0) apply = 1;
         }
-        if (fast_pulse) apply = 1;
         if (!apply) continue;
 
         /* MAIN.ASM:3407-3408 @@detect_inc_speed_option: play iff_speed_up
-         * when the natural timer expires. Fast-ball powerup pulses are
-         * silent (sound is on powerup pickup, not on every sub-frame tick). */
-        if (natural_tick && g->audio) audio_play(g->audio, SFX_SPEEDUP);
+         * when the natural timer expires. */
+        if (g->audio) audio_play(g->audio, SFX_SPEEDUP);
 
         /* MAIN.ASM:3398-3402 @@detect_inc_speed:
          *   mov eax,speed_level
@@ -1416,14 +1601,16 @@ static void tick_speed_counter(Game *g) {
          * Multiply by 3 to compensate 60fps vs ASM 18fps. */
         g->balls[i].speed_counter = g->speed_level * 3;
         {
-            int lim_x = (fast_cap_x > 0) ? fast_cap_x : (SPEED_MAX_X + g->balls[i].angle);
+            /* inc_speed_x: MAIN.ASM:3427-3441 clamp at speed_max_x+angle */
+            int lim_x = SPEED_MAX_X + g->balls[i].angle;
             if (g->balls[i].vx > 0 && g->balls[i].vx < lim_x)
                 g->balls[i].vx++;
             else if (g->balls[i].vx < 0 && g->balls[i].vx > -lim_x)
                 g->balls[i].vx--;
         }
         {
-            int lim_y = (fast_cap_y > 0) ? fast_cap_y : (SPEED_MAX_Y - g->balls[i].angle);
+            /* inc_speed_y: clamp at speed_max_y-angle */
+            int lim_y = SPEED_MAX_Y - g->balls[i].angle;
             if (g->balls[i].vy > 0 && g->balls[i].vy < lim_y)
                 g->balls[i].vy++;
             else if (g->balls[i].vy < 0 && g->balls[i].vy > -lim_y)
@@ -1532,6 +1719,11 @@ static int projectile_hit_brick(Game *g, Projectile *p)
              * hardcoded powerup_freq_table[] if no override present. */
             PowerupType pt = g->dev_test ? dev_next_powerup(g)
                                          : pick_powerup_cfg(g);
+            /* Iter3-B: MAIN.ASM:5466-5468  cmp delai_random_option,eax /
+             * jb @@end / mov delai_random_option,Off — the window is
+             * consumed BEFORE the frequency roll, so a failed draw still
+             * resets the counter. */
+            g->option_spawn_timer = 0;
             if (pt < POWERUP_COUNT) {
                 int bx = level_brick_x(idx);
                 int by = level_brick_y(idx);
@@ -1541,7 +1733,6 @@ static int projectile_hit_brick(Game *g, Projectile *p)
                 SPAWN_LOG(g, "powerup_spawn(proj): type=%d at x=%d y=%d (brick %d)",
                           pt, bx, by, idx);
                 g->powerup_count++;
-                g->option_spawn_timer = 0;
             }
         }
     }
@@ -1619,8 +1810,8 @@ static void detect_collision_cursor(Game *g) {
  *
  * Teleports the ball to a random free position inside the play area.
  *
- *   X ∈ [bord_x+100, limite_x-100)      = [212, 428)
- *   Y ∈ [bord_y+100, limite_y-100)      = [100, 316)
+ *   X ∈ [bord_x+100, limite_x-100]      = [212, 428]   (get_random inclusive)
+ *   Y ∈ [bord_y+100, limite_y-100]      = [100, 316]
  *
  * For each candidate position, all 4 sprite corners are probed against
  * the brick grid (MAIN.ASM:1695-1726 Test_Random_Pos):
@@ -1632,11 +1823,10 @@ static void detect_collision_cursor(Game *g) {
  *   1509  option_telepod_p's Refresh_Ball branch (per-ball one-shot)
  *   4069  @@teleportation (ball hits a BRICK_TELEPORTER)
  *
- * The ASM retries forever; we cap at ASM_TELEPORT_RETRIES to stay
- * deterministic if a level somehow walls in the whole centre.
+ * The ASM retries forever; we cap at TELEPORT_RETRIES_CAP (defined at the
+ * top of this file) to stay deterministic if a level somehow walls in the
+ * whole centre.
  * -------------------------------------------------------------------------- */
-#define TELEPORT_RETRIES_CAP 64
-
 static int teleport_corner_blocked(Game *g, int x, int y) {
     int col, row, idx;
     if (x < PLAY_X1 || x >= PLAY_X2) return 1;
@@ -1653,9 +1843,13 @@ static int teleport_corner_blocked(Game *g, int x, int y) {
 static void teleport_ball_random(Game *g, Ball *b) {
     int tries;
     for (tries = 0; tries < TELEPORT_RETRIES_CAP; tries++) {
-        /* MAIN.ASM:1533-1542 — raw get_random, then add base offset. */
-        int rx = GetRandomValue(PLAY_X1 + 100, PLAY_X2 - 100 - 1);
-        int ry = GetRandomValue(PLAY_Y1 + 100, PLAY_W  - 100 - 1);
+        /* MAIN.ASM:1533-1542:
+         *   mov eax,limite_x-bord_x-200 / call get_random / add eax,bord_x+100
+         *   mov eax,limite_y-bord_y-200 / call get_random / add eax,bord_y+100
+         * get_random is 0..n INCLUSIVE, so the top position (limite-100) is
+         * reachable — the previous GetRandomValue(..., hi-1) dropped it. */
+        int rx = PLAY_X1 + 100 + asm_get_random(PLAY_X2 - PLAY_X1 - 200);
+        int ry = PLAY_Y1 + 100 + asm_get_random(PLAY_W  - PLAY_Y1 - 200);
         /* Test_Random_Pos is called 4 times with (esi, edi) =
          * (0, 0), (size_y, 0), (0, size_x), (size_y, size_x) —
          * the four sprite corners. MAIN.ASM:1544-1560. */
@@ -1863,7 +2057,12 @@ void game_update(Game *g, const FrameInput *input) {
                 if (!owner_fire) continue;
                 {
                     int vx, vy;
-                    compute_launch_velocity(g->difficulty, g->level_num, &vx, &vy);
+                    compute_launch_velocity(g, g->level_num, &vx, &vy);
+                    /* Iter3-C: MAIN.ASM:5311-5325 — ball_2 launches MIRRORED:
+                     * `neg eax / mov ball_2.sprite_sens_x,eax` then
+                     * `sub ball_2.sprite_sens_x,eax` for the level boost →
+                     * vx is negative (leftward); vy is the same as ball_1. */
+                    if (owner == 1) vx = -vx;
                     ball_set_velocity(&g->balls[i], vx, vy);
                     g->balls[i].is_magnetic = 0;
                 }
@@ -2118,19 +2317,56 @@ void game_update(Game *g, const FrameInput *input) {
          * MAIN.ASM:4208-4209  cmp sprite_ghost,On → @@end_ghost. */
         if (g->balls[i].is_ghost && g->balls[i].vy > 0) {
             int bx = g->balls[i].x, by = g->balls[i].y;
+            int ghost_burst = 0;
+            int burst_owner = 0;
+            /* Iter3-F: the ghost test lives INSIDE detect_colision_cursor_
+             * player_1/2, whose duel entry gate rejects the other player's
+             * balls (MAIN.ASM:4157-4161 `cmp [edx.sprite_player],O player_1 /
+             * jne @@end`, and MAIN.ASM:4280-4284 for player_2) — same gate
+             * as the normal bounce below. */
+            int test_p1 = (g->game_mode != 2) || (g->balls[i].owner == 0);
+            int test_p2 = (g->game_mode > 0)
+                          && ((g->game_mode != 2) || (g->balls[i].owner == 1));
             /* P1 paddle */
-            if (by + BALL_H >= g->paddle.y
+            if (test_p1
+                && by + BALL_H >= g->paddle.y
                 && bx + BALL_W > g->paddle.x
                 && bx < g->paddle.x + g->paddle.w) {
-                g->balls[i].active = 0;
-                continue;
+                ghost_burst = 1;
+                burst_owner = 0;
             }
             /* P2 paddle in coop/duel */
-            if (g->game_mode > 0
+            if (!ghost_burst && test_p2
                 && by + BALL_H >= g->paddle_2.y
                 && bx + BALL_W > g->paddle_2.x
                 && bx < g->paddle_2.x + g->paddle_2.w) {
+                ghost_burst = 1;
+                burst_owner = 1;
+            }
+            if (ghost_burst) {
                 g->balls[i].active = 0;
+                /* MAIN.ASM:4183-4205 / 4306-4328 @@end_ghost: the ghost ball
+                 * turns into the break_ball_* burst animation in place
+                 * (sens_x/sens_y zeroed, break_nbs_anim frames) — the ONLY
+                 * two sites of this animation in the ASM. */
+                for (j = 0; j < MAX_BREAK_ANIMS; j++) {
+                    if (!g->break_anims[j].active) {
+                        g->break_anims[j].x = bx;
+                        g->break_anims[j].y = by;
+                        g->break_anims[j].frame = 0;
+                        g->break_anims[j].active = 1;
+                        /* Iter3-E: record the sprite-family choice for draw.c.
+                         * P1 paddle → break_ball_orange_o (46,9), or
+                         * break_ball_blue_o (46,0) when the ball was iron
+                         * (MAIN.ASM:4183-4193: eax=orange unless sprite_adrs
+                         * != ghost_ball_orange_o → blue). P2 paddle → the
+                         * green/yellow pair at x=116 (MAIN.ASM:4306-4316,
+                         * Blaster.inc:2-5). */
+                        g->break_anims[j].owner    = burst_owner;
+                        g->break_anims[j].was_iron = g->balls[i].is_iron;
+                        break;
+                    }
+                }
                 continue;
             }
         }
@@ -2200,13 +2436,11 @@ void game_update(Game *g, const FrameInput *input) {
         }
 
         if (bc.hit && bc.brick_index >= 0) {
-            /* Ghost ball: explode on first brick contact.
-             * MAIN.ASM:4183-4205  @@end_ghost: switch to break sprite, delete. */
-            if (g->balls[i].is_ghost) {
-                g->balls[i].active = 0;
-                /* Still damage the brick if it was a normal brick */
-                continue;
-            }
+            /* Ghost balls break bricks and bounce like any other ball:
+             * detect_brique (MAIN.ASM:3947-4111) never tests sprite_ghost —
+             * the ONLY ghost test is in the paddle collision
+             * (MAIN.ASM:4207-4209 @@inverse_sens_y: cmp [edx.sprite_ghost],On
+             * / je @@end_ghost), handled above. */
 
             /* Teleporter brick: MAIN.ASM:4067-4073 @@teleportation calls
              * Teleporte_Ball which picks a random free position in the
@@ -2259,18 +2493,12 @@ void game_update(Game *g, const FrameInput *input) {
                 if (hidx < 0 || hidx >= BRICK_COUNT) continue;
                 hb = &g->bricks[hidx];
 
-                /* Update raw level data + spawn break anim on destruction */
+                /* Update raw level data on destruction. No break animation
+                 * here: the break_ball anim has exactly two sites in the ASM
+                 * (MAIN.ASM:4183-4205 / 4306-4328 @@end_ghost — a ghost ball
+                 * bursting on the paddle), never brick destruction. */
                 if (hdest) {
                     g->current_level.bricks[hidx] = ABSENTE;
-                    for (j = 0; j < MAX_BREAK_ANIMS; j++) {
-                        if (!g->break_anims[j].active) {
-                            g->break_anims[j].x = hb->x + BRICK_W / 2 - BALL_W / 2;
-                            g->break_anims[j].y = hb->y + BRICK_H / 2 - BALL_H / 2;
-                            g->break_anims[j].frame = 0;
-                            g->break_anims[j].active = 1;
-                            break;
-                        }
-                    }
                 }
 
                 /* Play brick-hit SFX for transparent bricks too (they don't
@@ -2296,6 +2524,11 @@ void game_update(Game *g, const FrameInput *input) {
                          * fallback to hardcoded powerup_freq_table[]). */
                         PowerupType pt = g->dev_test ? dev_next_powerup(g)
                                                      : pick_powerup_cfg(g);
+                        /* Iter3-B: MAIN.ASM:5466-5468 — window consumed
+                         * BEFORE the frequency roll; a failed draw still
+                         * resets the counter (mov delai_random_option,Off
+                         * precedes the get_random gate). */
+                        g->option_spawn_timer = 0;
                         if (pt < POWERUP_COUNT) {
                             int bx = level_brick_x(hidx);
                             int by = level_brick_y(hidx);
@@ -2305,7 +2538,6 @@ void game_update(Game *g, const FrameInput *input) {
                             SPAWN_LOG(g, "powerup_spawn(ball): type=%d at x=%d y=%d (brick %d)",
                                       pt, bx, by, hidx);
                             g->powerup_count++;
-                            g->option_spawn_timer = 0;
                         }
                     }
                 }
@@ -2320,17 +2552,9 @@ void game_update(Game *g, const FrameInput *input) {
         /* Check ball lost (exited bottom of screen).
          * MAIN.ASM:4581  play_sound iff_lost_ball — ball falls off screen */
         if (ball_lost(&g->balls[i])) {
-            /* Spawn break animation at ball's last position.
-             * MAIN.ASM:break_ball anim — same animation used for brick destruction. */
-            for (j = 0; j < MAX_BREAK_ANIMS; j++) {
-                if (!g->break_anims[j].active) {
-                    g->break_anims[j].x = g->balls[i].x;
-                    g->break_anims[j].y = g->balls[i].y;
-                    g->break_anims[j].frame = 0;
-                    g->break_anims[j].active = 1;
-                    break;
-                }
-            }
+            /* No break animation here: detect_destruction (MAIN.ASM:4526+)
+             * just kills the sprite. The break_ball anim's only ASM sites are
+             * @@end_ghost (MAIN.ASM:4183-4205 / 4306-4328) — ghost on paddle. */
             if (g->audio) audio_play(g->audio, SFX_BALL_LOST);
 #if defined(BRICKBLASTER_MOBILE)
             platform_vibrate(150);
@@ -2426,7 +2650,9 @@ void game_update(Game *g, const FrameInput *input) {
                  *   Y-flip: 4 (idx 2,6,9,13)
                  *   XY:     7 (idx 3,4,7,8,11,12,15) */
                 if (!g->balls[i].is_iron) {
-                    int r = GetRandomValue(0, 15);  /* MAIN.ASM:3201 mov eax,15 */
+                    /* MAIN.ASM:3201-3202  mov eax,15 / call get_random —
+                     * 0..15 inclusive, 16 directions. */
+                    int r = asm_get_random(15);
                     switch (r) {
                         case 0:
                             /* MAIN.ASM:3908 cmp new_direction,Off je @@end */
@@ -2537,15 +2763,22 @@ void game_update(Game *g, const FrameInput *input) {
             continue;
         }
         /* Check collection.
-         * MAIN.ASM:5579-5624  detect_prise_option
+         * MAIN.ASM:5605-5611  detect_prise_option opens with
+         *   cmp game_mode,PLAYING / je @@ok / ret
+         * — NO collection outside PLAYING. During the "ready ?" screen
+         * (READY_TO_PLAY_AGAIN) powerups keep falling but the idle paddle
+         * must not scoop a residual multiball ("une balle est apparue sans
+         * prévenir" player report).
          * MAIN.ASM:347  play_sound iff_option — generic powerup collect sound
          * Demo mode: play sound but do NOT apply powerup effects.
          * DEMO_MODE_FIX.md: "No powerup effects applied when demo_flag=On". */
         /* MP: check both paddles; the one that overlaps gets the powerup. */
         int collected_by = -1;   /* 0 = P1, 1 = P2 */
-        if (powerup_collected(&g->powerups[i], &g->paddle)) collected_by = 0;
-        else if (g->game_mode > 0 &&
-                 powerup_collected(&g->powerups[i], &g->paddle_2)) collected_by = 1;
+        if (g->state == STATE_PLAYING) {
+            if (powerup_collected(&g->powerups[i], &g->paddle)) collected_by = 0;
+            else if (g->game_mode > 0 &&
+                     powerup_collected(&g->powerups[i], &g->paddle_2)) collected_by = 1;
+        }
 
         if (collected_by >= 0) {
             if (g->audio) audio_play(g->audio, SFX_POWERUP_COLLECT);
@@ -2668,12 +2901,19 @@ void game_update(Game *g, const FrameInput *input) {
     }
 
     /* Tick break animations.
-     * DRAW.ASM:Refresh_Sprites advances break_ball frame each BREAK_SPEED frames.
-     * Blaster.inc:6  break_nbs_anim=5, Blaster.inc:7  break_speed=1 */
-    for (i = 0; i < MAX_BREAK_ANIMS; i++) {
-        if (!g->break_anims[i].active) continue;
-        g->break_anims[i].frame++;
-        if (g->break_anims[i].frame >= BREAK_NBS_ANIM)
-            g->break_anims[i].active = 0;
+     * Iter3-D: DRAW.ASM:389-393  `dec [edx.sprite_current_speed] / jns @@next`
+     * with break_speed=1 (Blaster.inc:7): current_speed goes 1→0 (skip) then
+     * 0→-1 (advance + reload), i.e. the shape advances every SECOND screen
+     * frame, not every frame. sprite_to_delete = break_nbs_anim+2 = 7,
+     * deleted when the countdown reaches On (DRAW.ASM:395-399) → ~12 screen
+     * frames total, not 5. We advance on even global frames (per-sprite
+     * phase in the ASM differs by at most one frame). */
+    if ((g->frame & 1) == 0) {
+        for (i = 0; i < MAX_BREAK_ANIMS; i++) {
+            if (!g->break_anims[i].active) continue;
+            g->break_anims[i].frame++;
+            if (g->break_anims[i].frame >= BREAK_NBS_ANIM)
+                g->break_anims[i].active = 0;
+        }
     }
 }

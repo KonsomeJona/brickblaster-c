@@ -49,14 +49,35 @@ int assets_load(Assets *a)
 
     memset(a, 0, sizeof(*a));
 
-    /* --- Core sprite sheet (SPRITE.png, 640px wide) ---
+    /* --- Core sprite sheets (SPRITE0.png / SPRITE1.png, 640px wide) ---
      * Blaster.inc: all in-game sprites packed into one 640-wide buffer.
      * Ball at (0,0), paddle at (0,42), bricks at (66,95), etc.
      * See SPRITES.md section 4-7 for complete layout.
+     *
+     * One sheet per world palette: Read_Palette (FILE.ASM:776-791) replaces
+     * the sprite palette with sprite0.pal or sprite1.pal on every world load
+     * (digit patched at file_palette+6 — MAIN.ASM:483/491). The sheets are
+     * SPRITE.GIF indices rendered through each palette (VGA 6-bit ×4).
+     * World 1 reuses the legacy SPRITE.png: rendering SPRITE.GIF through
+     * sprite1.pal reproduces it pixel for pixel (verified, 0 differing
+     * pixels over 640x1900), so shipping a separate SPRITE1.png would be
+     * a byte-identical duplicate to keep in sync for nothing.
      */
-    a->sprite_sheet = load_texture_warn(ASSETS_BASE "sprites/SPRITE.png",
-                                         &a->sprite_sheet_loaded);
-    count += a->sprite_sheet_loaded;
+    static const char *const sheet_paths[ASSETS_SPRITE_WORLDS] = {
+        ASSETS_BASE "sprites/SPRITE0.png",  /* world 0 — sprite0.pal */
+        ASSETS_BASE "sprites/SPRITE.png",   /* world 1 — sprite1.pal */
+    };
+    for (int w = 0; w < ASSETS_SPRITE_WORLDS; w++) {
+        a->sprite_sheets[w] = load_texture_warn(sheet_paths[w],
+                                                &a->sprite_sheets_loaded[w]);
+        count += a->sprite_sheets_loaded[w];
+    }
+
+    /* Default world is 0: FILE.ASM:9 `File_Palette db 'sprite0.pal',0`
+     * and MAIN.ASM `world db '0'`. */
+    a->sprite_world = 0;
+    a->sprite_sheet        = a->sprite_sheets[0];
+    a->sprite_sheet_loaded = a->sprite_sheets_loaded[0];
 
     /* --- Font sheet (FONTE.png) ---
      * FONTE.ASM: bitmap font for score, HUD, and text rendering.
@@ -107,9 +128,38 @@ int assets_load(Assets *a)
     return count;
 }
 
+void assets_select_world(Assets *a, int world)
+{
+    /* World 2 (@@coin_coin, MAIN.ASM:495-501) is commented out in the ASM:
+     * selecting it never touches file_palette, so the previous palette
+     * stays in effect. Reproduce that as a no-op. */
+    if (world < 0 || world >= ASSETS_SPRITE_WORLDS) {
+        TraceLog(LOG_WARNING, "ASSETS: world %d has no sprite palette, keeping world %d",
+                 world, a->sprite_world);
+        return;
+    }
+    if (!a->sprite_sheets_loaded[world]) {
+        TraceLog(LOG_WARNING, "ASSETS: sprite sheet for world %d not loaded, keeping world %d",
+                 world, a->sprite_world);
+        return;
+    }
+    a->sprite_world        = world;
+    a->sprite_sheet        = a->sprite_sheets[world];
+    a->sprite_sheet_loaded = a->sprite_sheets_loaded[world];
+}
+
 void assets_unload(Assets *a)
 {
-    if (a->sprite_sheet_loaded)  { UnloadTexture(a->sprite_sheet);   a->sprite_sheet_loaded  = 0; }
+    /* sprite_sheet is an alias of one of sprite_sheets[] — clear it without
+     * UnloadTexture() so the GPU texture is not freed twice. */
+    a->sprite_sheet = (Texture2D){0};
+    a->sprite_sheet_loaded = 0;
+    for (int w = 0; w < ASSETS_SPRITE_WORLDS; w++) {
+        if (a->sprite_sheets_loaded[w]) {
+            UnloadTexture(a->sprite_sheets[w]);
+            a->sprite_sheets_loaded[w] = 0;
+        }
+    }
     if (a->font_sheet_loaded)    { UnloadTexture(a->font_sheet);      a->font_sheet_loaded    = 0; }
     if (a->menu_image_loaded)    { UnloadTexture(a->menu_image);      a->menu_image_loaded    = 0; }
     if (a->monster_sheet_loaded) { UnloadTexture(a->monster_sheet);   a->monster_sheet_loaded = 0; }

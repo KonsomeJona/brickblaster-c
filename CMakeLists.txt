@@ -41,6 +41,7 @@ endif()
 # -------------------------------------------------------------------------
 add_executable(brickblaster
     src/main.c
+    src/asm_random.c
     src/game.c
     src/draw.c
     src/ball.c

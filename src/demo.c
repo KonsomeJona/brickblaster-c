@@ -127,17 +127,36 @@ int demo_check_activate(Game *g) {
 void demo_handle_ball_lost(Game *g) {
     if (!g->demo_active) return;
 
-    /* Respawn ball on paddle centre.
+    /* Respawn ball 1 on paddle centre.
      * MAIN.ASM:5187-5194  ball_x = paddle_x + paddle_w/2 - ball_w/2 */
     ball_init(&g->balls[0],
               g->paddle.x + g->paddle.w / 2 - BALL_W / 2,
               g->paddle.y - BALL_H);
 
-    /* MAIN.ASM:2762-2763  fixed demo ball velocity */
-    g->balls[0].vx         = 3;    /* MAIN.ASM:2762  sprite_sens_x = +3 */
-    g->balls[0].vy         = -4;   /* MAIN.ASM:2763  sprite_sens_y = -4 */
+    /* MAIN.ASM:2762-2764  ball_1: sprite_status On, fixed demo velocity */
+    g->balls[0].vx         = 3;    /* MAIN.ASM:2763  sprite_sens_x = +3 */
+    g->balls[0].vy         = -4;   /* MAIN.ASM:2764  sprite_sens_y = -4 */
     g->balls[0].is_magnetic = 0;
+    g->balls[0].owner       = 0;   /* P1 */
     g->ball_count          = 1;
+
+    /* MAIN.ASM:2766-2770  cmp nbs_player,2 / jne @@end —
+     * a 2-player demo respawns ball_2 too, on paddle_2, mirrored velocity:
+     *   mov ball_2.sprite_status,On
+     *   mov ball_2.sprite_sens_x,-3
+     *   mov ball_2.sprite_sens_y,-4
+     * Without this, the demo's second ship lost its ball forever after the
+     * first miss. game_mode > 0 = the current session is 2-player. */
+    if (g->game_mode > 0) {
+        ball_init(&g->balls[1],
+                  g->paddle_2.x + g->paddle_2.w / 2 - BALL_W / 2,
+                  g->paddle_2.y - BALL_H);
+        g->balls[1].vx          = -3;  /* MAIN.ASM:2769  sprite_sens_x = -3 */
+        g->balls[1].vy          = -4;  /* MAIN.ASM:2770  sprite_sens_y = -4 */
+        g->balls[1].is_magnetic = 0;
+        g->balls[1].owner       = 1;   /* P2 */
+        g->ball_count           = 2;
+    }
 
     g->state = STATE_PLAYING;
 }
