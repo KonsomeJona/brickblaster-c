@@ -1,0 +1,83 @@
+name: Web
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-web:
+    name: Web (Emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned emsdk known-good with raylib 5.0 (which predates the 3.1.7x
+      # linker changes); the action caches the toolchain between runs.
+      - name: Setup emsdk
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+          actions-cache-folder: emsdk-cache
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # The repo assets stay untouched (desktop keeps its WAVs). The web
+      # bundle preloads a staged copy where the 82 MB of WAV music becomes
+      # OGG Vorbis (~q5 ≈ 160 kbps — plenty for MOD-tracker-derived music).
+      # music_manager.c prefers the .ogg variant when it exists.
+      - name: Stage web assets (music WAV -> OGG)
+        run: |
+          cp -r assets web-assets
+          for f in web-assets/music/*.wav; do
+            ffmpeg -hide_banner -loglevel error -y -i "$f" \
+              -c:a libvorbis -qscale:a 5 "${f%.wav}.ogg"
+            rm "$f"
+          done
+          echo "Staged asset sizes:"
+          du -sh web-assets web-assets/music
+          ls -lh web-assets/music
+
+      - name: Configure
+        # CMAKE_POLICY_VERSION_MINIMUM: same workaround as the desktop CI
+        # (raylib 5.0 declares an older cmake_minimum_required than modern
+        # CMake accepts). Note: GIF_RECORDER stays ON — turning it OFF does
+        # not link on ANY platform (main.c calls gif_recorder_* unconditionally
+        # while the option only drops gif_recorder.c from the target).
+        run: >
+          emcmake cmake -B build-web
+          -DCMAKE_BUILD_TYPE=Release
+          "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+          -DWEB_ASSETS_DIR=$GITHUB_WORKSPACE/web-assets
+
+      - name: Build
+        run: cmake --build build-web --parallel
+
+      # Self-contained static bundle: copy these four files to any static
+      # host. index.html is the emitted shell (renamed from brickblaster.html
+      # — the .js it references is loaded by basename, so renaming the HTML
+      # is safe).
+      - name: Stage bundle
+        run: |
+          mkdir -p dist/brickblaster-web
+          cp build-web/brickblaster.html dist/brickblaster-web/index.html
+          cp build-web/brickblaster.js   dist/brickblaster-web/
+          cp build-web/brickblaster.wasm dist/brickblaster-web/
+          cp build-web/brickblaster.data dist/brickblaster-web/
+          echo "Final bundle:"
+          ls -lh dist/brickblaster-web
+          du -sh dist/brickblaster-web
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brickblaster-web
+          path: dist/brickblaster-web
+          if-no-files-found: error
+          retention-days: 7

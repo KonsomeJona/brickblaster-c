@@ -1,0 +1,143 @@
+<!doctype html>
+<!--
+  web/shell.html — Emscripten shell page for the BrickBlaster web build.
+
+  Self-contained on purpose: no CDN, no external fonts, no network use at
+  runtime beyond fetching the .js/.wasm/.data emitted next to this page, so
+  the bundle works on any static host.
+
+  IMPORTANT: do not size the canvas with CSS (width/height rules). main.c
+  sets the canvas pixel size itself (SetWindowSize to the viewport, then
+  raylib's resize callback keeps it in sync). A CSS override would create a
+  canvas.clientWidth != canvas.width mismatch that breaks mouse coordinates.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>BrickBlaster</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      color: #ddd;
+      font-family: monospace;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas.emscripten {
+      display: block;
+      border: 0;
+      outline: none;
+      background: #000;
+    }
+    /* Loading overlay — hidden once the runtime is up. */
+    #loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: #000;
+      z-index: 10;
+      transition: opacity 0.4s;
+    }
+    #loader.hidden { opacity: 0; pointer-events: none; }
+    #loader h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 6px;
+      color: #e8b23a;
+    }
+    #progress {
+      width: 260px;
+      height: 6px;
+      background: #222;
+      border: 1px solid #444;
+    }
+    #progress > div {
+      width: 0%;
+      height: 100%;
+      background: #e8b23a;
+      transition: width 0.15s;
+    }
+    #status { font-size: 12px; color: #888; min-height: 1em; }
+    /* One-line key reminder, bottom of the screen, unobtrusive. */
+    #keys {
+      position: fixed;
+      bottom: 6px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 11px;
+      color: #555;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="loader">
+    <h1>BRICKBLASTER</h1>
+    <div id="progress"><div id="progress-bar"></div></div>
+    <div id="status">Loading...</div>
+  </div>
+
+  <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+
+  <div id="keys">Mouse / &#8592; &#8594; move &nbsp;&middot;&nbsp; click / Space fire &nbsp;&middot;&nbsp; Esc pause</div>
+
+  <script>
+    var statusElement = document.getElementById('status');
+    var progressBar = document.getElementById('progress-bar');
+    var loaderElement = document.getElementById('loader');
+
+    var Module = {
+      canvas: (function() {
+        var canvas = document.getElementById('canvas');
+        // WebGL context loss (GPU reset, tab discard): a reload is the only
+        // sane recovery for a game this small.
+        canvas.addEventListener('webglcontextlost', function(e) {
+          e.preventDefault();
+          window.location.reload();
+        }, false);
+        return canvas;
+      })(),
+      setStatus: function(text) {
+        // Emscripten reports "Downloading data... (loaded/total)" — turn that
+        // into the progress bar; an empty string means the runtime is ready.
+        if (!text) {
+          loaderElement.classList.add('hidden');
+          return;
+        }
+        var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+        if (m) {
+          progressBar.style.width = (parseInt(m[2]) / parseInt(m[4]) * 100) + '%';
+          statusElement.textContent = m[1].trim();
+        } else {
+          statusElement.textContent = text;
+        }
+      },
+      monitorRunDependencies: function(left) {
+        // Progress detail is already covered by setStatus; nothing extra.
+      }
+    };
+    Module.setStatus('Loading...');
+    window.onerror = function(message) {
+      statusElement.textContent = 'Error — see browser console';
+      statusElement.style.color = '#c0392b';
+      loaderElement.classList.remove('hidden');
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

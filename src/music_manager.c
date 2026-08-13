@@ -12,13 +12,33 @@ static const char *music_paths[MUSIC_COUNT] = {
     ASSETS_BASE "music/Rain.wav"
 };
 
+/* Resolve a music path with extension fallback: prefer the .ogg variant when
+ * one exists next to the canonical .wav. The web bundle converts the 82 MB of
+ * WAV music to OGG at CI time to keep the download sane (raylib decodes OGG
+ * natively via stb_vorbis); desktop distributions ship the WAVs unchanged, so
+ * there the fallback is a no-op. Returns wav_path itself or `buf`. */
+static const char *music_resolve_path(const char *wav_path,
+                                      char *buf, size_t buf_len) {
+    size_t len = strlen(wav_path);
+    if (len < 4 || len >= buf_len) return wav_path;
+    memcpy(buf, wav_path, len + 1);
+    if (strcmp(buf + len - 4, ".wav") == 0) {
+        memcpy(buf + len - 4, ".ogg", 4);   /* same length — NUL kept */
+        if (FileExists(buf)) return buf;
+    }
+    return wav_path;
+}
+
 void music_manager_init(MusicManager *mgr) {
     if (!mgr) return;
 
     memset(mgr, 0, sizeof(MusicManager));
 
     for (int i = 0; i < MUSIC_COUNT; i++) {
-        mgr->tracks[i] = LoadMusicStream(music_paths[i]);
+        char pathbuf[512];
+        const char *path = music_resolve_path(music_paths[i],
+                                              pathbuf, sizeof(pathbuf));
+        mgr->tracks[i] = LoadMusicStream(path);
 
         // Check if load succeeded
         if (mgr->tracks[i].ctxData != NULL) {
@@ -26,7 +46,7 @@ void music_manager_init(MusicManager *mgr) {
             SetMusicVolume(mgr->tracks[i], MUSIC_DEFAULT_VOLUME);
         } else {
             mgr->tracks_loaded[i] = 0;
-            fprintf(stderr, "Warning: Failed to load %s\n", music_paths[i]);
+            fprintf(stderr, "Warning: Failed to load %s\n", path);
         }
     }
 
