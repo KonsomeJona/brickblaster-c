@@ -22,10 +22,20 @@ jobs:
             exe: brickblaster
             archive_cmd: tar -czf
             archive_ext: tar.gz
-          - os: macos-latest
-            name: macOS arm64
-            artifact: brickblaster-macos-arm64
+          # GitHub's native ARM runners are free for public repositories.
+          - os: ubuntu-24.04-arm
+            name: Linux arm64
+            artifact: brickblaster-linux-arm64
             exe: brickblaster
+            archive_cmd: tar -czf
+            archive_ext: tar.gz
+          # One universal binary instead of two downloads: CMAKE_OSX_ARCHITECTURES
+          # propagates to raylib through FetchContent, so the dependency is fat too.
+          - os: macos-latest
+            name: macOS universal
+            artifact: brickblaster-macos-universal
+            exe: brickblaster
+            cmake_extra: -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
             archive_cmd: tar -czf
             archive_ext: tar.gz
           - os: windows-latest
@@ -34,12 +44,18 @@ jobs:
             exe: brickblaster.exe
             archive_cmd: 7z a
             archive_ext: zip
+          - os: windows-11-arm
+            name: Windows arm64
+            artifact: brickblaster-windows-arm64
+            exe: brickblaster.exe
+            archive_cmd: 7z a
+            archive_ext: zip
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux deps
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -47,17 +63,17 @@ jobs:
             libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Configure
-        # Quote the -D argument: on windows-latest this step runs under pwsh,
-        # which re-parses the bare token and hands CMake "3" instead of "3.5"
-        # ("Invalid CMAKE_POLICY_VERSION_MINIMUM value"). Quoting passes it
-        # through verbatim on all three runners.
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        # Quote the -D argument: on the Windows runners this step executes under
+        # pwsh, which re-parses the bare token and hands CMake "3" instead of
+        # "3.5" ("Invalid CMAKE_POLICY_VERSION_MINIMUM value"). Quoting passes it
+        # through verbatim everywhere.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" ${{ matrix.cmake_extra }}
 
       - name: Build
         run: cmake --build build --config Release --parallel
 
       - name: Stage artifact (Unix)
-        if: matrix.os != 'windows-latest'
+        if: ${{ !startsWith(matrix.os, 'windows') }}
         run: |
           mkdir -p dist/${{ matrix.artifact }}
           cp build/${{ matrix.exe }} dist/${{ matrix.artifact }}/
@@ -66,7 +82,7 @@ jobs:
           cd dist && ${{ matrix.archive_cmd }} ${{ matrix.artifact }}.${{ matrix.archive_ext }} ${{ matrix.artifact }}
 
       - name: Stage artifact (Windows)
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows')
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/${{ matrix.artifact }}
