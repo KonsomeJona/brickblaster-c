@@ -19,12 +19,27 @@
 
         <!-- NativeActivity subclass: adds the accelerometer -> jniConsumeTiltX
              JNI bridge that src/input_tilt.c expects, plus fullscreen flags. -->
+        <!-- Large screens, tablets and foldables:
+             - sensorLandscape (not landscape) so the device can be held either
+               way round — the 180° flip matters on tablets.
+             - resizeableActivity: split-screen and free-form windows. Default
+               is true since API 24, but declaring it stops the large-screen
+               compatibility letterbox from kicking in on Android 12+.
+             - smallestScreenSize in configChanges is THE foldable line: the
+               Pixel Fold changes its smallest dimension when it opens, and
+               without it the activity is DESTROYED and recreated mid-game —
+               fatal for a NativeActivity, whose GL context goes with it.
+             main.c already handles the rest: it detects a screen-size change
+             (rotation / fold / unfold), recreates the render textures, fixes
+             the GL viewport and pauses play; letterbox.h maps the fixed
+             640x480 canvas onto any window size. -->
         <activity
             android:name=".BrickBlasterActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
             <!-- Name of the native library built by src/main/cpp/CMakeLists.txt -->
