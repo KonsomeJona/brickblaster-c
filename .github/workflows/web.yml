@@ -8,6 +8,18 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# deploy-pages needs to mint an OIDC token and write to the Pages environment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. Never cancel one in flight: a half-published site
+# is worse than a stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build-web:
     name: Web (Emscripten)
@@ -81,3 +93,25 @@ jobs:
           path: dist/brickblaster-web
           if-no-files-found: error
           retention-days: 7
+
+      # Same bundle, packaged the way deploy-pages expects. Only on main:
+      # a pull request must not overwrite the published site.
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/brickblaster-web
+
+  # Publishes the playable build to https://<user>.github.io/brickblaster-c/.
+  # Requires Settings → Pages → Source = "GitHub Actions" once, by hand.
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: build-web
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
