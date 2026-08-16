@@ -27,18 +27,18 @@
  *
  *   PADDLE (P1 only in single-player; same Y row for each size)
  *   Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042)  → Rect(0,   42, 74, 25)
- *   Blaster.inc:281  vaisseau_large_1_o = 296+(screen_x*042) → Rect(296, 42,105, 25)
- *   Blaster.inc:286  vaisseau_small_1_o = 506+(screen_x*042) → Rect(506, 42, 38, 25)
+ *   Blaster.inc:284  vaisseau_large_1_o = 296+(screen_x*042) → Rect(296, 42,105, 25)
+ *   Blaster.inc:289  vaisseau_small_1_o = 506+(screen_x*042) → Rect(506, 42, 38, 25)
  *
  *   BRICKS (32x16)
- *   Blaster.inc:342  brique_classic_o = 066+(screen_x*095) → Rect(66, 95, 32, 16)
- *   Blaster.inc:343  brique_multi_o   = 033+(screen_x*095) → Rect(33, 95, 32, 16)
- *   Blaster.inc:346  next_color = screen_x*17 → 17 row stride between colors
- *   Blaster.inc:347  next_brique = 33          → 33 px horizontal per damage state
+ *   Blaster.inc:345  brique_classic_o = 066+(screen_x*095) → Rect(66, 95, 32, 16)
+ *   Blaster.inc:351  brique_multi_o   = 033+(screen_x*095) → Rect(33, 95, 32, 16)
+ *   Blaster.inc:348  next_color = screen_x*17 → 17 row stride between colors
+ *   Blaster.inc:349  next_brique = 33          → 33 px horizontal per damage state
  *   Color rows: Green=95, Blue=112, Violet=129, Orange=146
- *   Blaster.inc:350  brique_beton_o = 585+(screen_x*029) → Rect(585, 29, 32, 16)
- *   Blaster.inc:352  brique_transp_o = 198+(screen_x*095) → Rect(198, 95, 32, 16)
- *   Blaster.inc:353  brique_teleport_o = 231+(screen_x*095) → Rect(231, 95, 32, 16)
+ *   Blaster.inc:342  brique_beton_o = 585+(screen_x*029) → Rect(585, 29, 32, 16)
+ *   Blaster.inc:346  brique_transp_o = 198+(screen_x*095) → Rect(198, 95, 32, 16)
+ *   Blaster.inc:347  brique_teleport_o = 231+(screen_x*095) → Rect(231, 95, 32, 16)
  *
  *   POWERUPS (26x24 each, sprite_atlas.gd:166)
  *   Row 1 base: Rect(1, 752, 26, 24), stride 26 px horizontal (NEXT_OPTION=26)
@@ -50,8 +50,8 @@
  *   Blaster.inc:248  vaisseau_tir_big_1   = 446+(screen_x*413) → Rect(446,413,13,19)
  *
  *   HUD PANELS
- *   Blaster.inc:204  panel_level_o  = 001+(screen_x*019) → Rect(1,  19, 30, 22)
- *   Blaster.inc:212  panel_score_1_o= 032+(screen_x*019) → Rect(32, 19, 90, 22)
+ *   Blaster.inc:203  panel_level_o  = 001+(screen_x*019) → Rect(1,  19, 30, 22)
+ *   Blaster.inc:210  panel_score_1_o= 032+(screen_x*019) → Rect(32, 19, 90, 22)
  *   Blaster.inc:219  panel_nbs_ball = 631+(screen_x*000) → Rect(631, 0, 9, 9) blue
  *                                     631+(screen_x*009) → Rect(631, 9, 9, 9) orange
  */
@@ -107,9 +107,9 @@ static const Rectangle SR_GHOST_P2_IRON    = { 27,  0, 9, 9 };
 /* --- Paddle (Player 1 in single-player mode) --- */
 /* Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042) */
 static const Rectangle SR_PADDLE_NORMAL    = {   0, 42, 74, 25 };
-/* Blaster.inc:281  vaisseau_large_size_x=105, y same row 42 */
+/* Blaster.inc:284  vaisseau_large_size_x=105, y same row 42 */
 static const Rectangle SR_PADDLE_LARGE     = { 296, 42,105, 25 };
-/* Blaster.inc:286  vaisseau_small_size_x=38, y same row 42 */
+/* Blaster.inc:289  vaisseau_small_size_x=38, y same row 42 */
 static const Rectangle SR_PADDLE_SMALL     = { 506, 42, 38, 25 };
 
 /* --- Paddle Player 2 (P1-ASM-28) ---
@@ -121,24 +121,24 @@ static const Rectangle SR_PADDLE_P2_LARGE  = { 296, 68,105, 25 };
 static const Rectangle SR_PADDLE_P2_SMALL  = { 506, 68, 38, 25 };
 
 /* --- Bricks --- */
-/* Blaster.inc:342  brique_classic_o = 066+(screen_x*095) */
+/* Blaster.inc:345  brique_classic_o = 066+(screen_x*095) */
 #define BRICK_BASE_X   66
 #define BRICK_BASE_Y   95
-/* Blaster.inc:346  next_color = screen_x*17 → 17 rows between colors */
+/* Blaster.inc:348  next_color = screen_x*17 → 17 rows between colors */
 #define BRICK_COLOR_ROW_STRIDE  17
-/* Blaster.inc:347  next_brique = 33 (horizontal stride per damage state) */
+/* Blaster.inc:349  next_brique = 33 (horizontal stride per damage state) */
 #define BRICK_DAMAGE_STRIDE     33
 
-/* Blaster.inc:350  brique_beton_o = 585+(screen_x*029) */
+/* Blaster.inc:342  brique_beton_o = 585+(screen_x*029) */
 static const Rectangle SR_BRICK_INDESTR    = { 585, 29, 32, 16 };
 /* Indestructible flash frame: sprite_atlas.gd:148  BRIQUE_REFLET = Rect2(585, 97, 32, 16) */
 static const Rectangle SR_BRICK_REFLET     = { 585, 97, 32, 16 };
 
-/* Blaster.inc:352  brique_transp_o  = 198+(screen_x*095) */
+/* Blaster.inc:346  brique_transp_o  = 198+(screen_x*095) */
 #define BRICK_TRANSP_BASE_X  198
-/* Blaster.inc:353  brique_teleport_o= 231+(screen_x*095) */
+/* Blaster.inc:347  brique_teleport_o= 231+(screen_x*095) */
 #define BRICK_TELE_BASE_X    231
-/* Multi-hit base: Blaster.inc:343  brique_multi_o = 033+(screen_x*095) */
+/* Multi-hit base: Blaster.inc:351  brique_multi_o = 033+(screen_x*095) */
 #define BRICK_MULTI_BASE_X   33
 
 /* --- Powerups (26x24) --- */
@@ -147,6 +147,7 @@ static const Rectangle SR_BRICK_REFLET     = { 585, 97, 32, 16 };
 #define POWERUP_BASE_Y  752
 /* NEXT_OPTION = 26  (Blaster.inc:142) */
 #define POWERUP_STRIDE   26
+/* Atlas row decals live with get_powerup_rect below (OPTION_ROW_*). */
 
 /* All falling options blit from the single Y=752 row:
  * Blaster.inc:144-171  option_1_o = 001+(screen_x*752); every
@@ -215,9 +216,9 @@ static const Rectangle SR_CANNON_BIG_P1    = { 446, 413, 13, 19 };
 static const Rectangle SR_CANNON_BIG_P2    = { 446, 435, 13, 19 };
 
 /* --- HUD panels --- */
-/* Blaster.inc:204  panel_level_o = 001+(screen_x*019) */
+/* Blaster.inc:203  panel_level_o = 001+(screen_x*019) */
 static const Rectangle SR_PANEL_LEVEL     = {  1, 19, 30, 22 };
-/* Blaster.inc:212  panel_score_1_o = 032+(screen_x*019) */
+/* Blaster.inc:210  panel_score_1_o = 032+(screen_x*019) */
 static const Rectangle SR_PANEL_SCORE     = { 32, 19, 90, 22 };
 /* F5 P1-ASM-41b: P2 score panel background (dual mode only)
  * MAIN.ASM:5992-6012 init_panel draws Panel_Score_2 with sprite
@@ -237,6 +238,19 @@ static const Rectangle SR_PANEL_SCORE_P2  = { 444, 384, 90, 22 };
  * add sprite_pos_x,-12 per life), so a single-cell source is enough. */
 static const Rectangle SR_HUD_LIFE_P1     = { 619, 0, 9, 9 };
 static const Rectangle SR_HUD_LIFE_P2     = { 619, 9, 9, 9 };
+
+/* Side-wall pillars stamped by create_border (MAIN.ASM:5825-5852).
+ * Blaster.inc:362-365
+ *   border_right_o = 579+(screen_x*514)   → atlas (579, 514)
+ *   border_left_o  = 579+(screen_x*610)   → atlas (579, 610)
+ *   border_size_x  = 42
+ *   border_size_y  = 96
+ * Five tiles are stacked per side (`mov ebp,5` / `add edi,ecx`), 5*96 = 480
+ * = full screen height. The left column starts at bord_x - border_size_x
+ * (`mov ebx,bord_x / sub ebx,edx` → 112-42 = 70), the right one at limite_x
+ * (528). */
+static const Rectangle SR_BORDER_LEFT     = { 579, 610, 42, 96 };
+static const Rectangle SR_BORDER_RIGHT    = { 579, 514, 42, 96 };
 /* F5 P1-ASM-41c: option background + info banner — TODO.
  * MAIN.ASM:5859-5940 init_panel draws:
  *   panel_option_o = (  1, 827) 26x24  (Blaster.inc:140  option_off)
@@ -255,33 +269,33 @@ static const Rectangle SR_HUD_LIFE_P2     = { 619, 9, 9, 9 };
  * where:
  *   color_offset = color_index * (screen_x * next_color_rows)
  *   damage_offset = damage_level * next_brique
- * Blaster.inc:346  next_color   = screen_x*17  (17-row stride)
- * Blaster.inc:347  next_brique  = 33            (33-px horizontal stride)
+ * Blaster.inc:348  next_color   = screen_x*17  (17-row stride)
+ * Blaster.inc:349  next_brique  = 33            (33-px horizontal stride)
  * ============================================================================ */
 static Rectangle get_brick_rect(const Brick *b) {
     int base_x, base_y;
 
     switch (b->type) {
     case BRICK_INDESTRUCTIBLE:
-        /* Blaster.inc:350  brique_beton_o */
+        /* Blaster.inc:342  brique_beton_o */
         return SR_BRICK_INDESTR;
 
     case BRICK_TRANSPARENT:
-        /* Blaster.inc:352  brique_transp_o */
+        /* Blaster.inc:346  brique_transp_o */
         base_x = BRICK_TRANSP_BASE_X;
         base_y = BRICK_BASE_Y;
         break;
 
     case BRICK_TELEPORTER:
-        /* Blaster.inc:353  brique_teleport_o */
+        /* Blaster.inc:347  brique_teleport_o */
         base_x = BRICK_TELE_BASE_X;
         base_y = BRICK_BASE_Y;
         break;
 
     default:
         /* BRICK_NORMAL: classic (HP=1) vs multi-hit (HP>1) use different base sprites.
-         * Blaster.inc:342  brique_classic_o = 066+(screen_x*095) — single-hit bricks
-         * Blaster.inc:343  brique_multi_o   = 033+(screen_x*095) — multi-hit bricks */
+         * Blaster.inc:345  brique_classic_o = 066+(screen_x*095) — single-hit bricks
+         * Blaster.inc:351  brique_multi_o   = 033+(screen_x*095) — multi-hit bricks */
         {
             /* Same capped value as the damage state below — equivalent here
              * (both 7 and the capped 4 are > 1) but reading `raw` twice with
@@ -326,21 +340,28 @@ static Rectangle get_brick_rect(const Brick *b) {
  * MAIN.ASM struc_options table row for each powerup defines sprite offset.
  * sprite_atlas.gd:166  OPTION_1 = Rect2(1, 752, 26, 24), NEXT_OPTION=26
  *
- * F5 P1-ASM-35: in dual mode, P2-owned options use the +25 Y row in the atlas
- * (option_2_decal). Blaster.inc:145  option_2_decal = screen_x*777 - option_1_o
- *                                                 = screen_x*(777-752) = +25 rows.
- * MAIN.ASM:5525-5533 adds option_2_decal to sprite_adrs for P2 options only.
+ * The atlas holds the same 24 columns on three rows; `row_decal` selects which,
+ * as an offset from POWERUP_BASE_Y so none of them can drift from the base:
+ *   OPTION_ROW_FALL  +0   752  falling options
+ *   OPTION_ROW_P2   +25   777  P2-owned options in dual — Blaster.inc:145
+ *                              option_2_decal = screen_x*(777-752);
+ *                              MAIN.ASM:5525-5533 adds it for P2 only
+ *   OPTION_ROW_FADE +50   802  HUD icon of the active option — Blaster.inc:146
+ *                              option_fade_o; MAIN.ASM:5691-5694 is its only
+ *                              consumer, which is why falling options must
+ *                              never sample it
  * ============================================================================ */
-static Rectangle get_powerup_rect(PowerupType type, int p2_owned_dual) {
+#define OPTION_ROW_FALL   0
+#define OPTION_ROW_P2    25
+#define OPTION_ROW_FADE  50
+
+static Rectangle get_powerup_rect(PowerupType type, int row_decal) {
     int idx = (int)type;
     if (idx < 0 || idx >= POWERUP_COUNT) idx = 0;
     int col = POWERUP_SPRITE_COL[idx];
-    /* Blaster.inc:145  option_2_decal = 001+(screen_x*777)-option_1_o
-     * = +25 rows → Y=777 (pixel-verified populated icon row). */
-    int y_decal = p2_owned_dual ? 25 : 0;
     Rectangle r = {
         (float)(POWERUP_BASE_X + col * POWERUP_STRIDE),
-        (float)(POWERUP_BASE_Y + y_decal),
+        (float)(POWERUP_BASE_Y + row_decal),
         (float)OPTION_W,
         (float)OPTION_H
     };
@@ -419,7 +440,9 @@ void draw_shutdown(DrawContext *dc) {
  * Select background texture by level number.
  * 8 backgrounds per set (set 0 = world 0, set 1 = world 1).
  * Background selection: (level_num - 1) mod 8  → index 0..7.
- * MAIN.ASM:1004  call load_decor → FILE.ASM background selection logic.
+ * MAIN.ASM:1024  call next_fond -> FILE.ASM:270 -> load_file_fond
+     * (FILE.ASM:352-356  and eax,0111b = the mod-8 cycle described below).
+     * There is no `load_decor` label anywhere in the sources.
  * ============================================================================ */
 static void draw_background(DrawContext *dc, const Game *g) {
     int set   = g->world & 1;           /* 0 or 1 */
@@ -435,27 +458,41 @@ static void draw_background(DrawContext *dc, const Game *g) {
         ClearBackground(BLACK);
     }
 
-    /* Mask side panels — Arcade world (set 1) backgrounds have bright
-     * red side panels in the source art.  Space (set 0) panels are textured but
-     * still distracting; both worlds mask to keep focus on the play field.
-     * DRAW.ASM side-panel logic: panels outside PLAY_X1..PLAY_X2 are overdrawn.
+    /* No side-panel mask. The port used to paint a dark semi-transparent
+     * veil over columns 0..112 and 528..640 to hide "bright red side panels
+     * in the source art" — but those panels are a conversion artefact, not
+     * the original art. load_file_fond calls Create_Palette with ecx=16*3
+     * (FILE.ASM:384-386), so ONLY palette entries 0..15 of a background GIF
+     * are honoured; indices 16..255 are drawn with spriteN.pal, loaded once
+     * per world at FILE.ASM:250-255. The 01_*.png files had been converted
+     * through the GIF's own palette, where entries 229..243 are a single
+     * flat red — hence the red panels. Regenerated through Sprite1.pal they
+     * are the blue-grey machinery the 1999 game showed, and the veil is
+     * simply wrong. Entries 0 and 15 are blacked out at conversion time,
+     * matching FILE.ASM:376-382. */
+
+    /* create_border (MAIN.ASM:5825-5852) — the two metal pillars that frame
+     * the play field. Five 42x96 tiles per side, stacked from y=0:
+     *     mov esi,border_left_o / mov edi,0 / mov ebp,5
+     * @@again: call _draw_shape / add edi,ecx / dec ebp / jnz @@again
+     * The port had dropped them entirely. They are stamped here because
+     * FILE.ASM:388 calls create_border from load_file_fond, before the result
+     * is copied into background_buffer — i.e. they are part of the background,
+     * exactly this layer.
      *
-     * Instead of solid black, use a dark semi-transparent overlay with a gradient
-     * fade at the inner edge for a polished look on mobile. */
-    {
-        Color panel_dark = (Color){8, 8, 16, 220};
-        Color panel_edge = (Color){8, 8, 16, 120};
-        int grad_w = 8;  /* width of gradient fade strip */
-
-        /* Left panel: solid dark + gradient fade at right edge */
-        DrawRectangle(0, 0, PLAY_X1 - grad_w, SCREEN_H, panel_dark);
-        DrawRectangleGradientH(PLAY_X1 - grad_w, 0, grad_w, SCREEN_H,
-                               panel_dark, panel_edge);
-
-        /* Right panel: gradient fade at left edge + solid dark */
-        DrawRectangleGradientH(PLAY_X2, 0, grad_w, SCREEN_H,
-                               panel_edge, panel_dark);
-        DrawRectangle(PLAY_X2 + grad_w, 0, SCREEN_W - PLAY_X2 - grad_w, SCREEN_H, panel_dark);
+     * They are stamped after the background blit, which is where the ASM
+     * puts them: FILE.ASM:388 calls create_border from load_file_fond, before
+     * the result is copied into background_buffer. */
+    if (dc->assets->sprite_sheet_loaded) {
+        int tile_w = (int)SR_BORDER_LEFT.width;   /* Blaster.inc:364  border_size_x */
+        int tile_h = (int)SR_BORDER_LEFT.height;  /* Blaster.inc:365  border_size_y */
+        int y;
+        for (y = 0; y < SCREEN_H; y += tile_h) {  /* MAIN.ASM:5834  mov ebp,5 */
+            Vector2 lp = { (float)(PLAY_X1 - tile_w), (float)y };
+            Vector2 rp = { (float)PLAY_X2,            (float)y };
+            DrawTextureRec(dc->assets->sprite_sheet, SR_BORDER_LEFT,  lp, WHITE);
+            DrawTextureRec(dc->assets->sprite_sheet, SR_BORDER_RIGHT, rp, WHITE);
+        }
     }
 }
 
@@ -508,7 +545,9 @@ static void draw_powerups(DrawContext *dc, const Game *g) {
 
         /* F5 P1-ASM-35: P2 duel options draw from the +25-row atlas tile. */
         int p2_owned_dual = (g->game_mode == 2 && p->owner == 1);
-        Rectangle src = get_powerup_rect(p->type, p2_owned_dual);
+        Rectangle src = get_powerup_rect(p->type,
+                                         p2_owned_dual ? OPTION_ROW_P2
+                                                       : OPTION_ROW_FALL);
         /* No flips: MAIN.ASM:5522-5523 seeds sprite_adrs straight from the
          * option_*_o table and Draw_sprites blits rows top-down as stored. */
         /* Wear OS: draw 2x centred (small watch screen needs larger touch target).
@@ -743,7 +782,7 @@ static void draw_projectiles(DrawContext *dc, const Game *g) {
  * Level panel:  Blaster.inc:204  panel_level_size_x=30, panel_level_pos_x=123
  * Score panel:  Blaster.inc:212  panel_score_size_x=90, panel_score_pos_x=426
  * Ball lives:   Blaster.inc:219  panel_nbs_ball_size_x=9, panel_nbs_ball_pos_x=518
- *               Blaster.inc:221  panel_nbs_ball_pos_y_1=458 (P1 indicator)
+ *               Blaster.inc:222  panel_nbs_ball_pos_y_1=458 (P1 indicator)
  * Font (FONTE.ASM):
  *   Number digits drawn via font_draw_string after panel background sprite.
  *   Blaster.inc:206  panel_level_pos_x=123, panel_level_pos_y=9
@@ -861,7 +900,26 @@ static void draw_hud(DrawContext *dc, const Game *g) {
         }
     }
 
-    /* Pickup text banner — MAIN.ASM:347 last_print + panel_info blit.
+    /* Active-powerup icon at panel_option, bottom-left of the field.
+     * MAIN.ASM:5688-5694, right after the P2 decal is normalised away
+     * (MAIN.ASM:5683  sub eax,option_2_decal):
+     *     mov current_option,eax
+     *     mov current_option_count,DELAI_OPTION
+     *     sub eax,option_1_o
+     *     add eax,option_fade_o          ; same column, row 802
+     *     mov panel_option.sprite_adrs,eax
+     * The icon holds for the whole effect. Blaster.inc:146 option_fade_o is
+     * the row-802 variant of the row-752 falling icons, and this is its only
+     * consumer — which is why the falling options must never sample from it.
+     * The port showed a text banner alone and no icon at all. */
+    if (dc->assets->sprite_sheet_loaded &&
+        g->current_option != POWERUP_COUNT && g->current_option_count > 0) {
+        Rectangle src = get_powerup_rect(g->current_option, OPTION_ROW_FADE);
+        Vector2 pos = { PANEL_OPTION_POS_X, PANEL_OPTION_POS_Y };
+        DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+    }
+
+    /* Pickup text banner — MAIN.ASM:6274-6290 last_print + MAIN.ASM:5876-5880 panel_info blit.
      * Appears on powerup collection and holds for pickup_text_timer frames.
      * 24 STR_OPT_POW_* strings map 1-to-1 onto PowerupType (0..23). */
     if (g->pickup_text_timer > 0 && g->pickup_text_type >= 0 &&
@@ -940,7 +998,20 @@ void draw_frame_to_canvas(DrawContext *dc, const Game *g) {
         }
     }
 
-    /* Step 3c: Monsters
+    /* Step 4: Balls
+     * DRAW.ASM:Draw_sprites sprite_mode=ball */
+    draw_balls(dc, g);
+
+    /* Step 5: Paddle
+     * DRAW.ASM:Draw_sprites sprite_mode=vaisseau */
+    draw_paddle(dc, g);
+
+    /* Step 5b: Monsters — drawn AFTER balls and paddle.
+     * Draw_sprites walks the sprite table in declaration order (DRAW.ASM:426-434)
+     * and Monster_1..5 are declared at MAIN.ASM:7096, i.e. after Ball_1..20
+     * (7066) and Cursor_1/2 (7087). The port drew them before both, so the
+     * 70x70 explosion passed under the paddle instead of over it.
+     * (was: Step 3c: Monsters
      * DRAW.ASM:Draw_sprites sprite_mode=monster
      * Blaster.inc:120  monster_o = 001+(930*001) → starts at pixel (1,1)
      * Blaster.inc:123  monster_next = 930*(3+32) = 930*35 → 35 rows per variant
@@ -971,14 +1042,6 @@ void draw_frame_to_canvas(DrawContext *dc, const Game *g) {
             }
         }
     }
-
-    /* Step 4: Balls
-     * DRAW.ASM:Draw_sprites sprite_mode=ball */
-    draw_balls(dc, g);
-
-    /* Step 5: Paddle
-     * DRAW.ASM:Draw_sprites sprite_mode=vaisseau */
-    draw_paddle(dc, g);
 
     /* Step 6: Projectiles
      * DRAW.ASM:Draw_sprites sprite_mode=tir (shoot) */

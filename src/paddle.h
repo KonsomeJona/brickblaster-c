@@ -4,8 +4,12 @@
  * Ground truth: MAIN.ASM cursor/vaisseau sections and MOUSE.ASM Refresh_Keyboard.
  *
  * Movement speed:
- *   MOUSE.ASM:77  speed_counter dd 6   — paddle moves 6 pixels per key press
  *   MOUSE.ASM:49-72  @@keyboard_left/@@keyboard_right: sub/add speed_counter
+ *   MOUSE.ASM:77  speed_counter dd 6 — the LOADER INITIALISER only. From the
+ *   first ball launch onward the value is re-derived as 2x the ball's launch
+ *   speed (MAIN.ASM:5345-5348), i.e. 4/6/8 by difficulty, +2 per speed step;
+ *   game_update writes it to both paddles. `speed` is therefore 6 only until
+ *   the first serve.
  *
  * Paddle Y position:
  *   Blaster.inc:194  panel_option_pos_y = 458 - 12 = 446  (PADDLE_Y)

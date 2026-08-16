@@ -45,9 +45,17 @@
  *   mov ball_1.sprite_sens_y,-4     ; vy = -4
  *   (already handled in main.c @@demo branch)
  *
- * Demo effects on game rules (DEMO_MODE_FIX.md):
- *   - No score counting (MAIN.ASM never adds score when demo_flag=On)
- *   - No powerup effects applied (powerup collect still plays sound but no state change)
+ * Demo effects on game rules — deliberately almost none. The 1999 attract
+ * mode is a real game: `demo_flag` is never read by FONTE.ASM (inc_score),
+ * MOUSE.ASM or HISCORE.ASM, and never appears inside detect_prise_option or
+ * test_game_over. It scores, collects powerups and applies them.
+ * (An earlier DEMO_MODE_FIX.md claimed "no score counting" and "no powerup
+ * effects"; neither has any basis in the ASM and both gates were removed.)
+ * What genuinely differs:
+ *   - Paddle driven by the AI (demo_move_x_player_1, MAIN.ASM:5131-5144)
+ *   - Magnetic balls release on contact, with no click at all
+ *     (MAIN.ASM:3269-3272 / 3288-3290  cmp demo_flag,On / je @@shoot_*)
+ *   - Laser auto-fires on a delay counter (MAIN.ASM:1907-1920 @@auto_shoot)
  *   - Ball lost → respawn immediately (no life decrement in demo)
  *   - Any input → exit demo → return to menu
  *
@@ -88,11 +96,16 @@ int demo_check_activate(Game *g);
 /*
  * demo_handle_ball_lost — in demo mode, respawn ball instead of losing a life.
  *
- * MAIN.ASM demo mode: ball lost → reinit ball on paddle at fixed velocity.
- * No life decrement happens in demo (MAIN.ASM never calls detect_game_over
- * when demo_flag=On — the frame loop short-circuits via read_click exit).
+ * Ball lost → reinit ball on paddle at the fixed demo velocity.
  *
- * MAIN.ASM:2762-2763  sprite_sens_x=+3, sprite_sens_y=-4 (fixed demo velocity)
+ * Skipping the life decrement is a PORT DEVIATION, not fidelity.
+ * MAIN.ASM:1088 calls detect_game_over_player_1 unconditionally on every
+ * frame, well before the demo block at MAIN.ASM:1157-1168, and test_game_over
+ * (MAIN.ASM:4666-4712) carries no demo_flag or computer_flag guard anywhere.
+ * The 1999 attract mode really does run out of balls and reach GAME_OVER,
+ * from which NEW_PLAY restarts it. Respawning keeps the attract loop simple.
+ *
+ * MAIN.ASM:2763-2764  sprite_sens_x=+3, sprite_sens_y=-4 (fixed demo velocity)
  */
 void demo_handle_ball_lost(Game *g);
 
