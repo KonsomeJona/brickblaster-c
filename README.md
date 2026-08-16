@@ -83,6 +83,10 @@ through the wrong palette, so 858 718 pixels per screen were wrong and a
 dark veil had been added to hide them. **Releases up to v0.1.6 predate all
 of this** and do not have the parity their README claims.
 
+Where the material comes from, and what the sources actually say about
+licensing — including the questions still unanswered upstream:
+[PROVENANCE.md](PROVENANCE.md).
+
 Per-iteration audit trail with ASM line citations, newest first:
 - [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md) — full ASM ↔ C
   parity audit (August 2026): the 8 P0 divergences, the P1/P2 tail, and
