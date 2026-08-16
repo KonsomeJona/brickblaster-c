@@ -10,7 +10,7 @@
  *   play_sound iff_incassable MAIN.ASM:4055       — ball hits indestructible
  *   play_sound iff_lost_ball  MAIN.ASM:4581       — ball falls off screen
  *   play_sound iff_restart    MAIN.ASM:260,1207,4707 — new life / restart
- *   play_sound iff_option     MAIN.ASM:347        — powerup collected (generic)
+ *   play_sound iff_option  MAIN.ASM:5708 (menu click: 347)        — powerup collected (generic)
  *   play_sound iff_speed_up   MAIN.ASM:3408       — speed increase triggered
  *   play_sound iff_shoot      MAIN.ASM:1930,2139  — laser fired
  *   play_sound iff_multi      MAIN.ASM:4108       — multi-ball spawn
@@ -59,17 +59,19 @@ typedef enum {
     SFX_POWERUP_COLLECT, /* powerup collected (generic) — iff_option   → OPTIONON.wav */
     SFX_SPEEDUP,         /* speed increase            — iff_speed_up   → SPEEDUP.wav */
     SFX_SHOOT,           /* laser fired               — iff_shoot      → SHOOT.wav   */
-    SFX_MULTI_BALL,      /* multi-ball spawn          — iff_multi      → BOOM.wav    */
     SFX_LEVEL_COMPLETE,  /* level done                — iff_next_level → NEXT.wav    */
-    SFX_GAME_OVER,       /* game over                 — iff_game_over  → DEATH.wav   */
+    SFX_GAME_OVER,       /* ship destroyed — EVERY life lost, not just the last:
+                          * destroy_vaisseau MAIN.ASM:4795-4796. iff_game_over is
+                          * a label alias of iff_death (FILE.ASM:734-735) → DEATH.wav */
     SFX_NEW_LIFE,        /* extra life awarded        — iff_new_life   → NEWLIFE.wav */
     SFX_TELEPOD,         /* teleporter activated      — iff_telepod    → TELEPOD.wav */
     SFX_DEATH_POWERUP,   /* DEATH powerup collected   — iff_death      → DEATH.wav   */
-    SFX_EXPLOSION,       /* monster/brick explosion   — iff_explosion  → BOOM.wav    */
+    SFX_EXPLOSION,       /* ship explosion, paired with SFX_GAME_OVER on every life
+                          * lost — iff_explosion (boom.iff)  → BOOM.wav              */
     SFX_POWERUP_OFF,     /* timed powerup expired     — iff_option_off → ENDOPT.wav  */
     SFX_LARGE_PADDLE,    /* large paddle powerup      — iff_large      → LARGE.wav   */
     SFX_SMALL_PADDLE,    /* small paddle powerup      — iff_small      → SMALL.wav   */
-    SFX_POWERUP_LOST,    /* powerup fell off screen   — iff_lost_option → MONSTOFF.wav */
+    SFX_DEL_MONSTER,    /* monster destroyed — iff_del_monster → MONSTOFF.wav */
     SFX_NIGHT,           /* NIGHT powerup             — iff_night      → NIGHT.wav   */
     SFX_COUNT
 } SfxId;
@@ -77,7 +79,7 @@ typedef enum {
 typedef struct {
     Sound sfx[SFX_COUNT];
     int   sfx_loaded[SFX_COUNT];/* 1 for each SFX that was successfully loaded */
-    int   sfx_enabled;          /* 1 = play SFX normally, 0 = all SFX muted */
+    int   sfx_volume;           /* 0..64, FILE.ASM:816 User_Volume_Sfx */
 } AudioState;
 
 /* Initialise AudioState.  Calls LoadSound() for each WAV file.
