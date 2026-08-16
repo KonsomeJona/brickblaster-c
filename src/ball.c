@@ -35,8 +35,8 @@ void ball_init(Ball *b, int x, int y)
     b->prev_x     = x;
     b->prev_y     = y;
     b->telepod_timer = 0;
-    b->speed_counter = 0;  /* F1-C: per-ball counter; reset by game tick to
-                            * speed_level * 3 (60fps vs ASM 18fps scaling).
+    b->speed_counter = 0;  /* F1-C: per-ball counter; reset by the game tick to
+                            * speed_level, 1:1 with the ASM frame.
                             * MAIN.ASM:3388-3394 per-sprite sprite_speed_counter. */
 }
 
@@ -204,15 +204,33 @@ void ball_bounce_y(Ball *b)
 /* --------------------------------------------------------------------------
  * ball_lost
  *
- * Ball is lost when its bottom edge is at or below the screen bottom.
- * The ASM detects this in the wall collision routine and the main loop.
- * Condition: pos_y + ball_size_y >= screen_y
- *   BALL_H    = 9    Blaster.inc:334  ball_size
- *   SCREEN_H  = 480  Blaster.inc:424  screen_y
+ * MAIN.ASM:4526-4541  detect_destruction — the ball dies at the paddle's
+ * centre line, not at the bottom of the screen:
+ *
+ *     mov eax,[edx.sprite_sens_y]
+ *     or  eax,eax
+ *     js  @@end                       ; travelling upward → never lost
+ *     mov eax,limite_y                ; 416  (Blaster.inc:448)
+ *     mov ebx,cursor_1.sprite_size_y  ; 25   (Blaster.inc:228)
+ *     shr ebx,1                       ; 12
+ *     add eax,ebx                     ; threshold = 428
+ *     mov ebx,[edx.sprite_pos_y]
+ *     mov ecx,[edx.sprite_size_y]     ; 9    (Blaster.inc:334)
+ *     shr ecx,1                       ; 4
+ *     add ebx,ecx                     ; ball CENTRE
+ *     cmp eax,ebx
+ *     ja  @@end                       ; alive while threshold > centre
+ *
+ * so the ball is gone once its centre reaches the paddle's vertical centre,
+ * i.e. pos_y >= 424. The port used to wait for the ball to clear the whole
+ * 480 px screen (pos_y >= 471), handing the player 47 px of saves the 1999
+ * game never allowed. The upward guard matters: on the frame the paddle
+ * bounces the ball, sens_y is already negative and the ball survives.
  * -------------------------------------------------------------------------- */
 int ball_lost(const Ball *b)
 {
-    return (b->y + BALL_H >= SCREEN_H); /* BALL_H=9, SCREEN_H=480 */
+    if (b->vy < 0) return 0;                    /* MAIN.ASM:4531  js @@end */
+    return (b->y + BALL_H / 2) >= (PADDLE_Y + PADDLE_H / 2);
 }
 
 /* --------------------------------------------------------------------------

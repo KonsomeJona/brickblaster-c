@@ -13,7 +13,7 @@
 void monster_init_level(Monster *monsters, int level_num)
 {
     int i;
-    int variant = (level_num - 1) & 3;  /* MAIN.ASM:2933  and eax,011b */
+    int variant = (level_num - 1) & 3;  /* MAIN.ASM:2937  and eax,011b */
     for (i = 0; i < NBS_MONSTER; i++) {
         memset(&monsters[i], 0, sizeof(Monster));
         monsters[i].variant = variant;
@@ -91,8 +91,8 @@ int monster_add_now(Monster *monsters, int *spawn_counter, Difficulty diff,
         /* MAIN.ASM:2996-3035  initialise monster */
         monsters[i].active = 1;
         monsters[i].exploding = 0;
-        monsters[i].vx = 1;   /* MAIN.ASM:3002  mov [edx.sprite_sens_x],1 */
-        monsters[i].vy = 1;   /* MAIN.ASM:3003  mov [edx.sprite_sens_y],1 */
+        monsters[i].vx = 1;   /* MAIN.ASM:2998  mov [edx.sprite_sens_x],1 */
+        monsters[i].vy = 1;   /* MAIN.ASM:2999  mov [edx.sprite_sens_y],1 */
         monsters[i].y  = PLAY_Y1;  /* MAIN.ASM:3001  mov [edx.sprite_pos_y],bord_y */
 
         /* Random X in play area: MAIN.ASM:3026-3030
@@ -138,15 +138,24 @@ void monster_update(Monster *monsters)
             monsters[i].anim_timer = EXPLO_SPEED;  /* reload — DRAW.ASM:391-392 */
 
             /* sprite_to_delete = explo_nbs_anim + 2 = 15 (MAIN.ASM:3077-3078),
-             * decremented once per animation ADVANCE (DRAW.ASM:394-398), not
-             * per frame → the explosion lasts ~30 screen frames. */
+             * decremented once per animation ADVANCE (DRAW.ASM:394-398).
+             *   dec sprite_to_delete / cmp sprite_to_delete,On / jne @@ok
+             * stops at 1 (On = 1, Blaster.inc:431) — 14 advances, not 15.
+             * Then DRAW.ASM:403-416:
+             *   cmp sprite_current_shape,1 / jbe @@reset
+             *   @@reset: current_adrs = adrs ; current_shape = nbs_shape
+             *   @@inc:   current_adrs += size_x+next_shape ; dec current_shape
+             * current_shape starts at 1 (MAIN.ASM:3080), so the FIRST advance
+             * resets to frame 0 rather than stepping off it. */
             monsters[i].explo_timer--;
-            if (monsters[i].explo_timer <= 0) {
-                monsters[i].exploding = 0;  /* done */
+            if (monsters[i].explo_timer <= 1) {
+                monsters[i].exploding = 0;               /* DRAW.ASM:399-400 */
+            } else if (monsters[i].explo_shape <= 1) {
+                monsters[i].explo_frame = 0;             /* DRAW.ASM:412-413 */
+                monsters[i].explo_shape = EXPLO_NBS_ANIM;/* DRAW.ASM:414-415 */
             } else {
-                monsters[i].explo_frame++;
-                if (monsters[i].explo_frame >= EXPLO_NBS_ANIM)
-                    monsters[i].explo_frame = EXPLO_NBS_ANIM - 1; /* hold last */
+                monsters[i].explo_frame++;               /* DRAW.ASM:406-409 */
+                monsters[i].explo_shape--;
             }
             continue;
         }
@@ -225,6 +234,7 @@ void monster_kill(Monster *m)
     m->x -= 16;
     m->y -= 16;
     m->explo_frame = 0;
+    m->explo_shape = 1;                 /* MAIN.ASM:3080  sprite_current_shape = 1 */
     /* MAIN.ASM:3077-3078  mov sprite_to_delete,explo_nbs_anim / add ..,2 = 15,
      * consumed one step per animation advance (every 2 frames — see
      * monster_update). */
@@ -239,7 +249,7 @@ void monster_kill(Monster *m)
  *
  * MAIN.ASM:3151-3168  destruction_monster:
  *   For each active monster, call del_monster + play sound.
- * Iter 2 fix #7: SFX (iff_del_monster → MONSTOFF.wav → SFX_POWERUP_LOST) is
+ * Iter 2 fix #7: SFX (iff_del_monster → MONSTOFF.wav → SFX_DEL_MONSTER) is
  * played per-monster inside the loop, mirroring the ASM. Pass NULL to suppress.
  * -------------------------------------------------------------------------- */
 void monster_destroy_all(Monster *monsters, AudioState *audio)
@@ -248,7 +258,7 @@ void monster_destroy_all(Monster *monsters, AudioState *audio)
     for (i = 0; i < NBS_MONSTER; i++) {
         if (monsters[i].active) {
             monster_kill(&monsters[i]);
-            if (audio) audio_play(audio, SFX_POWERUP_LOST);
+            if (audio) audio_play(audio, SFX_DEL_MONSTER);
         }
     }
 }

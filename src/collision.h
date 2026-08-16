@@ -106,7 +106,8 @@ BrickCollision collision_bricks(Ball *ball, Brick *bricks, int brick_count);
  *   Left  wall: ball_x <= PLAY_X1 (112)  → bounce_x, clamp to PLAY_X1
  *   Right wall: ball_x + BALL_W >= PLAY_X2 (528) → bounce_x, clamp
  *   Top   wall: ball_y <= PLAY_Y1 (0)    → bounce_y, clamp
- *   Bottom:     ball_y + BALL_H >= SCREEN_H → lost (ball_lost() handles this)
+ *   Bottom:     no wall — ball_lost() kills the ball at the paddle centre
+ *               line (pos_y >= 424, MAIN.ASM:4526-4541), well above SCREEN_H
  *
  * Iter 2 fix #10: ghost balls bounce off walls normally; `ghost_active` is
  * ignored but kept for API compatibility. Verified against MAIN.ASM:3497.

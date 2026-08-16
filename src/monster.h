@@ -44,7 +44,10 @@ typedef struct {
                          * advances one frame every 2 screen frames
                          * (DRAW.ASM:388-392). */
     int explo_frame;    /* explosion animation frame (0..12) */
-    int explo_timer;    /* ticks until explosion finishes */
+    int explo_shape;    /* sprite_current_shape — counts DOWN 13..1, drives the
+                         * reset/advance branch at DRAW.ASM:403-416. Starts at 1
+                         * (MAIN.ASM:3080) so the first advance resets to frame 0. */
+    int explo_timer;    /* sprite_to_delete — stops the explosion at 1, not 0 */
     int variant;        /* 0-3: which sprite row (set by init_monster) */
     int top_bounce_ctr; /* sprite_counter_3: top-wall bounce delay (MAIN.ASM:3113-3122) */
 } Monster;
