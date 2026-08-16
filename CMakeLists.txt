@@ -138,3 +138,30 @@ if(MSVC)
         COMMENT "Copying assets"
     )
 endif()
+
+# -------------------------------------------------------------------------
+# Instrumental parity tests — headless, no window, no assets beyond levels.
+#
+# The rule layer (game/ball/brick/collision/powerup/monster/paddle/asm_random)
+# makes no raylib calls, and audio is skipped when Game.audio is NULL, so the
+# whole behaviour set can be driven from a plain main(). Off by default so the
+# normal build is untouched:
+#     cmake -B build -DBUILD_TESTS=ON && cmake --build build --target bb_tests
+#     (cd <repo root> && ./build/bb_tests)
+# -------------------------------------------------------------------------
+option(BUILD_TESTS "Build the headless parity tests" OFF)
+
+if(BUILD_TESTS)
+    add_executable(bb_tests
+        tests/test_parity.c
+        src/game.c src/ball.c src/brick.c src/collision.c src/powerup.c
+        src/monster.c src/paddle.c src/level.c src/asm_random.c src/demo.c
+        src/audio.c src/hiscore.c src/settings.c src/font.c src/i18n.c
+    )
+    target_include_directories(bb_tests PRIVATE src)
+    target_link_libraries(bb_tests raylib)
+    enable_testing()
+    add_test(NAME parity
+             COMMAND bb_tests
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
