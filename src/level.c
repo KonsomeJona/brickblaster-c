@@ -1,9 +1,10 @@
 #include "level.h"
+#include "assets.h"   /* ASSETS_BASE — same path convention as game_load_level */
 #include <string.h>
+#include <stdio.h>    /* snprintf (level_count path building) */
 #if defined(PLATFORM_ANDROID)
     #include "raylib.h"
 #else
-    #include <stdio.h>
     #include <stdlib.h>
 #endif
 
@@ -54,7 +55,13 @@ static unsigned char *read_file_data(const char *path, int *out_size) {
     fseek(f, 0, SEEK_SET);
     buf = (unsigned char *)malloc((size_t)sz);
     if (!buf) { fclose(f); return NULL; }
-    fread(buf, 1, (size_t)sz, f);
+    /* A short read would leave the level table half-filled with garbage and
+     * silently change level_count(), so treat it as a load failure. */
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
     fclose(f);
     *out_size = (int)sz;
     return buf;
@@ -108,6 +115,68 @@ int level_load(Level *lvl, const char *path, int level_num) {
     }
 
     return 0;
+}
+
+/* -----------------------------------------------------------------------
+ * level_count — number of PLAYABLE levels in a world file.
+ * MAIN.ASM:5025-5041  search_level_number:
+ *     mov esi,level_adrs
+ *     mov ecx,level_size
+ *     mov level_number,0
+ *   @@again:
+ *     cmp B [esi],-1                      ; block starts with 0xFF ?
+ *     je @@end                            ; yes → done
+ *     inc level_number
+ *     add esi,nbs_brique_x*nbs_brique_y   ; next 390-byte block
+ *     sub ecx,nbs_brique_x*nbs_brique_y
+ *     cmp ecx,0
+ *     ja @@again
+ *     jmp Error_File                      ; no sentinel found = corrupt file
+ *
+ * Counts 390-byte blocks until the first one whose FIRST byte is 0xFF
+ * (invalide).  Measured on the 1999 files: each .lv? is 31,200 bytes with
+ * the last 15,600 bytes all 0xFF — 40 playable levels + 40 empty slots.
+ *
+ * Divergence from ASM: a file with no 0xFF sentinel aborts the DOS game
+ * (Error_File); here we return the full capacity instead — all levels are
+ * valid, refusing to play them helps nobody.  Missing/short file → 0.
+ * ----------------------------------------------------------------------- */
+int level_count(int world) {
+    static int cache[3] = { -1, -1, -1 };
+    char path[128];
+    unsigned char *data;
+    int data_size = 0;
+    int n, off;
+
+    if (world < 0 || world > 2) return 0;
+    if (cache[world] >= 0) return cache[world];
+
+    /* Same path convention as game_load_level (game.c): capitalised
+     * filename first, lowercase fallback (blaster.lv2 is lowercase). */
+    snprintf(path, sizeof(path), ASSETS_BASE "levels/Blaster.lv%d", world);
+    data = read_file_data(path, &data_size);
+    if (!data) {
+        snprintf(path, sizeof(path), ASSETS_BASE "levels/blaster.lv%d", world);
+        data = read_file_data(path, &data_size);
+    }
+    if (!data) {
+        cache[world] = 0;
+        return 0;
+    }
+    if (data_size != LEVEL_FILE_SIZE) {
+        free_file_data(data);
+        cache[world] = 0;
+        return 0;
+    }
+
+    n = 0;
+    for (off = 0; off + BRICK_COUNT <= data_size; off += BRICK_COUNT) {
+        if (data[off] == 0xFF) break;   /* cmp B [esi],-1 / je @@end */
+        n++;
+    }
+    free_file_data(data);
+    cache[world] = n;
+    return n;
 }
 
 /* -----------------------------------------------------------------------

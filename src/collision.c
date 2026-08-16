@@ -71,9 +71,13 @@ static const CollisionFace s_dir_lookup[16] = {
  * MAIN.ASM:3714-3752  create_table_de_trajectoire_axe_x
  * Fixed-point 16.16 arithmetic throughout.
  *
- * Entry [0]: depart_fp >> 1  (SAR eax,1 — shifts the 16.16 value right one bit,
- *            which gives (depart_pixel / 2) as an integer — a "half" starting point
- *            that ensures the first check is slightly before the ball's current edge)
+ * Entry [0]: depart_fp >> 1  (MAIN.ASM:3716-3718  mov eax,depart_x_1 / sar eax,1).
+ *            This is NOT a half-pixel lead-in: shifting a 16.16 value right by
+ *            one bit leaves pixel<<15 — e.g. 224 becomes 7 340 032 — a
+ *            coordinate far outside the play field that detect_brique rejects
+ *            outright (MAIN.ASM:3951-3954). Sub-step 0 therefore never tests
+ *            anything. The value is reproduced as-is because the ASM does; the
+ *            "half starting point" reading was an invention.
  * Entries [1..n-1]: accumulated linear interpolation.
  *   Each step: delta = dest_fp - current_fp; step = delta / remaining; current += step
  *   Pixel value: current >> 16  (SAR ebx,16)
@@ -83,10 +87,9 @@ static const CollisionFace s_dir_lookup[16] = {
  * -------------------------------------------------------------------------- */
 static void build_trajectory_axis(int depart_fp, int dest_fp, int n, int out[])
 {
-    /* MAIN.ASM:3716-3718  first entry: SAR eax,1 on the 16.16 value.
-     * NOT >>16: the ASM shifts right by 1 bit, giving depart_fp/2 as a
-     * fractional position — a half-step before the ball's current edge,
-     * so the first sub-step checks slightly behind the ball. */
+    /* MAIN.ASM:3716-3718  SAR eax,1 on the 16.16 value → pixel<<15, an
+     * out-of-field coordinate that always fails detect_brique's bounds test.
+     * Faithful, and inert by construction. */
     out[0] = depart_fp >> 1;
 
     if (n <= 1) return;
@@ -194,7 +197,13 @@ static int check_brick_at_point(
         /* Transparent brick: ball passes through (no bounce) but brick
          * takes damage.
          * MAIN.ASM:3996  dec B [esi+ebx] — HP decremented BEFORE transparent check.
-         * MAIN.ASM:4035-4042  if transparent → clc, ret (no bounce, ball passes through). */
+         * MAIN.ASM:4035-4042 is the TRANSPARENT branch of the destruction path only.
+     * A transparent brick that SURVIVES its hit leaves through @@redraw_brique
+     * and returns `stc` (MAIN.ASM:4110) — a bounce. The port never bounces on
+     * transparent cells. Harmless with the shipped data: all three .lv files
+     * contain zero multi-hit transparent bricks, and the editor's F4 writes
+     * transparente+001b, i.e. 1 HP (EDITOR.ASM:253). Recorded because the
+     * citation used to describe the opposite of the ASM it points at. */
         if (b->type == BRICK_TRANSPARENT) {
             level_flag[index] = 1;
             {
@@ -219,7 +228,27 @@ static int check_brick_at_point(
          * off. Previously our port only handled the NORMAL case, so iron
          * balls were bouncing off incassable walls — reported upstream by
          * david4599 (2026-04-21). */
-        if (is_iron && b->type == BRICK_INDESTRUCTIBLE) return 0;
+        if (is_iron && b->type == BRICK_INDESTRUCTIBLE) {
+            /* Still a HIT for sound and reflet: @@collision plays
+             * iff_incassable and arms the reflet frames unconditionally
+             * (MAIN.ASM:4048-4062), and only the bounce is gated on rebond.
+             * Reporting the index lets the caller do both while we return 0
+             * for "no direction change". */
+            *out_index = index;
+            return 0;
+        }
+
+        /* Same for the teleporter. `cmp [edx.sprite_rebond],Off / je @@cont`
+         * (MAIN.ASM:3863-3864) is type-blind: an iron ball never contributes
+         * to new_direction for ANY cell. The teleport itself still happens —
+         * @@teleportation (MAIN.ASM:4068-4074) calls teleporte_ball and returns
+         * `stc` on its own path, independent of the bounce decision. The port
+         * guarded only NORMAL and INDESTRUCTIBLE, so an iron ball bounced off
+         * a teleporter before being warped. */
+        if (is_iron && b->type == BRICK_TELEPORTER) {
+            *out_index = index;
+            return 0;
+        }
 
         /* Mark as hit this frame */
         level_flag[index] = 1; /* MAIN.ASM:3991  mov B [edi+ebx],On */
@@ -498,13 +527,8 @@ BrickCollision collision_bricks(Ball *ball, Brick *bricks, int brick_count)
  *   min_x = PLAY_X1 = 112         (bord_x)
  *   max_x = PLAY_X2 - BALL_W      (limite_x - ball_size = 528 - 9 = 519)
  *   min_y = PLAY_Y1 = 0           (bord_y)
- *   max_y = SCREEN_H - BALL_H     (480 - 9 = 471)  [ball lost if below — no bounce]
- *
- * Note: the bottom wall is NOT bounced here.  ball_lost() detects that separately.
- * The ASM uses sprite_max_y = screen_y - sprite_size_y but for balls the max_y
- * wall bounce applies; the "lost" path is handled by the ball destruction check.
- * In practice the top wall bounces, and the left/right walls bounce.
- * The bottom wall is not a bounce — the ball is considered lost.
+ *   Bottom: no wall at all — ball_lost() kills the ball at the paddle centre
+ *   line (pos_y >= 424, MAIN.ASM:4526-4541), well above the screen edge.
  * -------------------------------------------------------------------------- */
 void collision_walls(Ball *ball, int ghost_active)
 {
@@ -514,19 +538,26 @@ void collision_walls(Ball *ball, int ghost_active)
      * The `ghost_active` parameter is kept for API compatibility. */
     (void)ghost_active;
 
-    /* MAIN.ASM:3500-3506  X-axis predictive check (pos_x + sens_x) */
+    /* The bounce NEVER writes the position. detect_colision_wall
+     * (MAIN.ASM:3497-3535) is purely predictive — it compares pos + sens
+     * against min/max and calls inverse_sens_x / inverse_sens_y (3512, 3527),
+     * and neither those (3548-3566) nor detect_blocage (5355-5394) touch
+     * sprite_pos_x/y. The port used to snap the ball onto the wall, shifting
+     * its trajectory by up to |v|-1 px on every single bounce. The engine's
+     * only position clamp is test_limite at DRAW time (DRAW.ASM:580-625),
+     * which never fires because the predictive test already prevents overrun.
+     *
+     * MAIN.ASM:3500-3506  X-axis predictive check (pos_x + sens_x) */
     {
         int nx = ball->x + ball->vx;
 
         /* Right wall: nx >= PLAY_X2 - BALL_W  MAIN.ASM:3503 */
         if (nx >= PLAY_X2 - BALL_W) {
-            ball_bounce_x(ball);
-            ball->x = PLAY_X2 - BALL_W;
+            ball_bounce_x(ball);                /* MAIN.ASM:3512  inverse_sens_x */
         }
         /* Left wall: nx <= PLAY_X1  MAIN.ASM:3505-3506 */
         else if (nx <= PLAY_X1) {
             ball_bounce_x(ball);
-            ball->x = PLAY_X1;
         }
     }
 
@@ -537,7 +568,6 @@ void collision_walls(Ball *ball, int ghost_active)
         /* Top wall: ny <= PLAY_Y1  MAIN.ASM:3520-3521  cmp eax,[sprite_min_y]; jbe */
         if (ny <= PLAY_Y1) {
             ball_bounce_y(ball);                /* MAIN.ASM:3527  call inverse_sens_y */
-            ball->y = PLAY_Y1;
         }
         /* Bottom: no bounce — ball_lost() handles detection separately. */
     }
@@ -608,12 +638,15 @@ void collision_paddle(Ball *ball, const Paddle *paddle, int magnetic_active)
      * paddle via sprite_magnetic while keeping velocity intact. On fire,
      * move_ball clears sprite_magnetic and resumes moving by (vx, vy).
      *
+     * detect_magnetic_player_1 is a plain setter that returns (MAIN.ASM:4398-
+     * 4439): it does NOT short-circuit the rest of @@inverse_sens_y. So a
+     * caught ball still gets `neg sens_y` (4219-4221) AND the per-zone angle
+     * adjustment (4223-4243) — the port used to `return` here, so a magnetic
+     * ball was released with whatever angle it arrived at.
      * Pin to paddle top so the ball visually sticks. */
     if (magnetic_active) {
-        ball->is_magnetic = 1;  /* now stuck to paddle */
-        ball->vy = -ball->vy;   /* MAIN.ASM:4220  neg sprite_sens_y (normal bounce) */
-        ball->y  = paddle->y - BALL_H;
-        return;
+        ball->is_magnetic = 1;             /* MAIN.ASM:4215 */
+        ball->y = paddle->y - BALL_H;      /* MAIN.ASM:3266-3268  move_ball pin */
     }
 
     /* MAIN.ASM:4219-4221  neg sprite_sens_y (bounce up — no clamp here) */

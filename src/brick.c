@@ -45,15 +45,37 @@ void brick_init(Brick *b, int index, unsigned char raw)
     /* Decode byte — Blaster.inc:390-406 */
     b->color = (raw & COULEUR_DE_BRIQUE) >> 6;   /* bits 7-6 → index 0-3  */
     b->type  = (BrickType)(raw & TYPE_DE_BRIQUE); /* bits 5-3 */
-    b->hp    = (int)(raw & RESISTANCE_DE_BRIQUE); /* bits 4-0 */
 
-    /* TRANSPARENTE type bit (0x10) overlaps with the HP mask (0x1F bit 4).
-     * Raw byte 0x10 → hp = 0x10 & 0x1F = 16, but intended HP is the lower nibble.
-     * Strip the type bit: use bits 3-0 only, floor at 1 so the brick is present.
-     * Blaster.inc:401  transparente = 0x10 (bit 4 = type) */
-    if (b->type == BRICK_TRANSPARENT) {
-        b->hp = (int)(raw & 0x0F);  /* lower nibble, excludes type bit 4 */
-        if (b->hp < 1) b->hp = 1;
+    /* Load-time HP transform — draw_brique (MAIN.ASM:4956-4973), replayed
+     * in ASM order.  The caller stores the transformed byte back into the
+     * play table (MAIN.ASM:4886-4891  lodsb / call draw_brique / mov [ebp],al),
+     * so this runs exactly once, at level load.
+     *
+     * 1. Transparent remap FIRST (MAIN.ASM:4959-4964):
+     *      and eax,type_de_brique / cmp eax,transparente / jne @@c
+     *      and ebx,not type_de_brique / or  ebx,normale
+     *    The resistance mask 00011111b overlaps the type field's bit 4
+     *    (transparente = 0x10), so clearing the type bits BEFORE the cap
+     *    test is what leaves transparents (0x11 → 0x21) at 1 HP.
+     *
+     * 2. Cap at 4 (MAIN.ASM:4966-4973):
+     *      mov eax,ebx / and eax,resistance_de_brique
+     *      cmp eax,1 / jbe @@d
+     *      and ebx,nombre_de_coups / or  ebx,100b
+     *    nombre_de_coups = 11111000b (Blaster.inc:390): any brick whose
+     *    resistance exceeds 1 enters play with exactly 4 HP.  Measured on
+     *    the 1999 .lv files: 294 destructible bricks (0x27/0x67/0xA7/0xE7)
+     *    go 7 → 4; the 331 bytes 0xE4 and ~1800 transparents unchanged. */
+    {
+        unsigned char eb = raw;
+        if ((eb & TYPE_DE_BRIQUE) == BRICK_TRANSPARENT) {
+            eb = (unsigned char)((eb & (unsigned char)~TYPE_DE_BRIQUE) | BRICK_NORMAL);
+        }
+        if ((eb & RESISTANCE_DE_BRIQUE) > 1) {
+            eb = (unsigned char)((eb & 0xF8) | 0x04);  /* nombre_de_coups | 100b */
+        }
+        b->hp = (int)(eb & RESISTANCE_DE_BRIQUE);
+        b->hp_initial = b->hp;
     }
 
     /* Active: empty (0x00/absente) and invalid (0xFF/invalide) are not active.

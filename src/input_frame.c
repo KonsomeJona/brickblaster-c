@@ -41,9 +41,27 @@ __declspec(dllimport) int __stdcall ScreenToClient(HWND_W32 hWnd, POINT_W32 *lpP
 static const float s_btn_speed[] = { 0.6f, 1.0f, 1.4f, 2.0f, 2.8f };
 static const float s_tilt_speed[] = { 0.4f, 0.8f, 1.5f, 2.5f, 3.5f };
 
+/* Web: latches to 1 on the first real touch point.  Only PLATFORM_WEB reads
+ * it — on web, touch events come from real touchstart callbacks and are NOT
+ * synthesized from the mouse, so a desktop-browser visitor never trips it.
+ * (Desktop native ignores the latch entirely: raylib desktop mirrors the
+ * mouse into the touch API, which would false-positive here.) */
+static int s_web_touch_seen = 0;
+
+int input_touch_ui_active(void) {
+#if defined(BRICKBLASTER_MOBILE)
+    return 1;                  /* phone/fold build: always touch */
+#elif defined(PLATFORM_WEB)
+    return s_web_touch_seen;   /* runtime: same page serves desktop + mobile */
+#else
+    return 0;                  /* desktop, Wear OS: never */
+#endif
+}
+
 void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
                       int button_speed, int tilt_speed,
-                      int pause_button_hit, int in_game)
+                      int pause_button_hit, int in_game,
+                      int p2_uses_keyboard)
 {
     memset(out, 0, sizeof(*out));
 
@@ -61,12 +79,24 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     Vector2 mouse_delta = GetMouseDelta();
     int touch_count = GetTouchPointCount();
 
+    /* First real touch → this visitor is on a touch device: enable the
+     * on-screen pause button + pause-overlay tap zones from now on.
+     * Updated unconditionally (avoids an unused-static warning off-web) but
+     * only ever READ on PLATFORM_WEB — see input_touch_ui_active(). */
+    if (touch_count > 0) s_web_touch_seen = 1;
+
     /* === Dev toggle === */
     out->dev_f9_pressed = IsKeyPressed(KEY_F9);
 
-    /* === Keyboard: directional === */
-    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))  out->move_left  = 1;
-    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) out->move_right = 1;
+    /* === Keyboard: directional ===
+     * A/D are a port convenience for P1 (the 1999 game drove cursor_1 from
+     * the mouse only — MOUSE.ASM Refresh_Mouse). They collide with P2's
+     * keyboard bindings, which are Q/A left and D right (MOUSE.ASM:33-72
+     * Refresh_Keyboard drives cursor_2), so a single A press used to move
+     * BOTH paddles left. Drop the aliases while P2 is on the keyboard;
+     * the arrow keys and the mouse are unaffected. */
+    if (IsKeyDown(KEY_LEFT)  || (!p2_uses_keyboard && IsKeyDown(KEY_A))) out->move_left  = 1;
+    if (IsKeyDown(KEY_RIGHT) || (!p2_uses_keyboard && IsKeyDown(KEY_D))) out->move_right = 1;
 
     /* === Gamepad: directional + analog === */
     if (gamepad_left_held())  out->move_left  = 1;
@@ -213,13 +243,32 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     }
 #endif
 
+    /* === On-screen pause button (runtime touch UI) ===
+     * Canvas-space hit test of the centralized click/tap against the
+     * PAUSE_BTN_* rect. Active only when the touch UI is on (Android mobile
+     * build, or web after the first real touch) and during gameplay states.
+     * A tap that lands on the button is the pause gesture — it must NOT
+     * also launch the ball / fire the gun. (On the mobile build the tap is
+     * additionally excluded from game-tap/drag by mobile_controls.c.) */
+    int touch_pause_hit = 0;
+    if (in_game && out->click_pressed && input_touch_ui_active()) {
+        Vector2 cp = letterbox_screen_to_canvas(
+            (Vector2){ out->click_screen_x, out->click_screen_y });
+        if (cp.x >= PAUSE_BTN_X && cp.x < PAUSE_BTN_X + PAUSE_BTN_W &&
+            cp.y >= PAUSE_BTN_Y && cp.y < PAUSE_BTN_Y + PAUSE_BTN_H) {
+            touch_pause_hit  = 1;
+            out->fire_pressed = 0;
+        }
+    }
+
     /* === Pause ===
      * Both `P` (per 1999 keybinding) and `ESC` (desktop UX convention)
      * toggle pause. ESC in the PAUSED state is handled separately in
      * main.c as an "exit to menu" shortcut — the pause handler there
      * consumes it before this flag reaches the resume path. */
     out->pause_pressed = IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)
-                      || gamepad_start() || pause_button_hit;
+                      || gamepad_start() || pause_button_hit
+                      || touch_pause_hit;
 
     /* P2 defaults — filled on demand by frame_input_poll_p2(). */
     out->p2_left = 0;

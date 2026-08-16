@@ -27,9 +27,10 @@
  *   (MAIN.ASM:3431 add eax,[edx.sprite_angle]  for X max)
  *   (MAIN.ASM:3448 sub eax,[edx.sprite_angle]  for Y max)
  *
- * ball_lost: ball is lost when bottom edge exits screen.
- *   MAIN.ASM computes this by comparing pos_y + ball_size_y >= screen_y.
- *   (SCREEN_H = 480, BALL_H = 9)
+ * ball_lost: ball is lost once its centre reaches the paddle's centre line,
+ *   and only while travelling downward.
+ *   MAIN.ASM:4526-4541 detect_destruction compares pos_y + ball_size_y/2
+ *   against limite_y + cursor_size_y/2 = 416 + 12 = 428, i.e. pos_y >= 424.
  *
  * is_magnetic: when On, ball stays attached to paddle until fire.
  *   MAIN.ASM:3231  cmp [edx.sprite_magnetic],Off  je @@ok
@@ -90,8 +91,8 @@ void ball_bounce_x(Ball *b);
  * MAIN.ASM:3559-3566  inverse_sens_y */
 void ball_bounce_y(Ball *b);
 
-/* Returns 1 if ball has exited through the bottom of the screen.
- * Condition: y + BALL_H >= SCREEN_H  (MAIN.ASM: ball lost check) */
+/* Returns 1 if the ball is lost — see the ball_lost note in the header
+ * block above for the rule and its MAIN.ASM:4526-4541 derivation. */
 int ball_lost(const Ball *b);
 
 /* Set velocity directly (used by launch logic and powerups). */

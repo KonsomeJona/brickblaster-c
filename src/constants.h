@@ -113,7 +113,11 @@
 // MONSTERS
 // ============================================================================
 
-#define NBS_MONSTER       4     // Blaster.inc:118  nbs_monster (max monsters on screen)
+#define NBS_MONSTER       5     // MAIN.ASM:7096-7100  Monster_1..Monster_5.
+                                // Add_Monster walks `cmp [edx.sprite_mode],monster`
+                                // (MAIN.ASM:2985-2986) so it fills all five slots.
+                                // Blaster.inc:118 nbs_monster = 4 bounds nothing:
+                                // its only reference is commented out (MAIN.ASM:2932).
 #define MONSTER_W        32     // Blaster.inc:121  monster_size_x
 #define MONSTER_H        32     // Blaster.inc:122  monster_size_y
 #define MONSTER_NBS_ANIM 16     // Blaster.inc:124  monster_nbs_anim

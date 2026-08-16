@@ -1,0 +1,144 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'me.takohi.brickblaster'
+    compileSdk 34
+    // Same NDK generation the author used for the private builds (r26 line).
+    ndkVersion '26.1.10909125'
+
+    defaultConfig {
+        applicationId 'me.takohi.brickblaster'
+        minSdk 21
+        targetSdk 34
+        versionCode 2
+        versionName '0.2.0'
+
+        ndk {
+            // x86_64 included so the game runs on emulators too.
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            // Android wrapper around the repo sources — see the header comment
+            // in that file for why we don't point at the root CMakeLists.txt yet.
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    // Release signing only if the (gitignored, local-only) keystore is present.
+    // The public deliverable is the debug-signed APK: assembleDebug needs no
+    // secrets — Gradle auto-generates ~/.android/debug.keystore.
+    def ksPropsFile = rootProject.file('keystore.properties')
+    if (ksPropsFile.exists()) {
+        def ksProps = new Properties()
+        ksPropsFile.withInputStream { ksProps.load(it) }
+        signingConfigs {
+            release {
+                storeFile rootProject.file(ksProps['storeFile'] ?: 'brickblaster-release.keystore')
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Debug-signed, installable everywhere via `adb install` /
+            // "unknown sources". Keep native debug symbols out of the APK.
+            ndk { debugSymbolLevel 'NONE' }
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (ksPropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            // Game assets are staged (not taken raw from ../../assets) so the
+            // 82 MB of WAV music can be shipped as OGG — see stageAssets below.
+            assets.srcDirs = ["${layout.buildDirectory.get().asFile}/stagedAssets"]
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * stageAssets — copy ../../assets into build/stagedAssets, converting
+ * music/*.wav to OGG (libvorbis) when ffmpeg is available on PATH.
+ *
+ * Repo assets are never modified. Without ffmpeg (plain local build) the
+ * WAVs are copied as-is and the APK is just fat (~100 MB instead of ~25 MB).
+ * CI installs ffmpeg, so the published artifact always gets OGG.
+ *
+ * NOTE: music_manager.c currently hardcodes "music/*.wav" paths; the
+ * .wav -> .ogg extension fallback is being added in a parallel change to
+ * music_manager.c/audio.c. Until it lands, an OGG-only APK boots and plays
+ * fine but with no music.
+ * ------------------------------------------------------------------------- */
+def repoAssets = rootProject.file('../assets')
+
+tasks.register('stageAssets') {
+    def stagedDir = layout.buildDirectory.dir('stagedAssets').get().asFile
+    inputs.dir(repoAssets)
+    outputs.dir(stagedDir)
+    doLast {
+        project.delete(stagedDir)
+        project.copy {
+            from repoAssets
+            into stagedDir
+            exclude 'music/**'
+        }
+        def musicSrc = new File(repoAssets, 'music')
+        def musicDst = new File(stagedDir, 'music')
+        musicDst.mkdirs()
+
+        // Probe ffmpeg and pick a Vorbis encoder (the game decodes OGG via
+        // raylib/stb_vorbis, so it must be Vorbis — not Opus). Prefer
+        // libvorbis; fall back to ffmpeg's native (experimental) encoder.
+        def vorbisArgs = null
+        try {
+            def p = new ProcessBuilder('ffmpeg', '-hide_banner', '-encoders')
+                    .redirectErrorStream(true).start()
+            def encoders = p.inputStream.text
+            if (p.waitFor() == 0) {
+                if (encoders.contains('libvorbis')) {
+                    vorbisArgs = ['-c:a', 'libvorbis', '-qscale:a', '5']
+                } else if (encoders =~ /\bvorbis\b/) {
+                    vorbisArgs = ['-c:a', 'vorbis', '-strict', 'experimental', '-b:a', '192k']
+                }
+            }
+        } catch (Exception ignored) { }
+
+        musicSrc.listFiles().each { f ->
+            if (vorbisArgs != null && f.name.toLowerCase().endsWith('.wav')) {
+                def outName = f.name.replaceAll(/(?i)\.wav$/, '.ogg')
+                def out = new File(musicDst, outName)
+                project.exec {
+                    commandLine(['ffmpeg', '-y', '-loglevel', 'error',
+                                 '-i', f.absolutePath] + vorbisArgs + [out.absolutePath])
+                }
+            } else {
+                project.copy { from f; into musicDst }
+            }
+        }
+        if (vorbisArgs == null) {
+            logger.warn('stageAssets: no ffmpeg Vorbis encoder — music shipped as WAV (APK will be ~100 MB).')
+        }
+    }
+}
+
+preBuild.dependsOn 'stageAssets'

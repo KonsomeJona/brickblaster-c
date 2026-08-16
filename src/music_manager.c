@@ -12,27 +12,52 @@ static const char *music_paths[MUSIC_COUNT] = {
     ASSETS_BASE "music/Rain.wav"
 };
 
+/* Load a music track, preferring the .ogg variant of the canonical .wav path.
+ * The web and Android builds convert the 82 MB of WAV music to OGG at CI time
+ * to keep the download sane (raylib decodes OGG natively via stb_vorbis);
+ * desktop distributions ship the WAVs unchanged, so there the .ogg attempt
+ * simply fails and we fall back.
+ *
+ * We ATTEMPT THE LOAD rather than probing with FileExists(): that helper is an
+ * access() call, which is blind to assets packed inside an Android APK — it
+ * would report the .ogg missing and send us to a .wav the conversion removed,
+ * leaving the game silent. LoadMusicStream goes through raylib's asset layer
+ * (android_fopen / the Emscripten MEMFS), so it sees what actually ships. */
+static Music music_load_any(const char *wav_path) {
+    size_t len = strlen(wav_path);
+    char buf[512];
+
+    if (len >= 4 && len < sizeof(buf) && strcmp(wav_path + len - 4, ".wav") == 0) {
+        memcpy(buf, wav_path, len + 1);
+        memcpy(buf + len - 4, ".ogg", 4);   /* same length — NUL kept */
+        Music ogg = LoadMusicStream(buf);
+        if (ogg.ctxData != NULL) return ogg;
+    }
+    return LoadMusicStream(wav_path);
+}
+
 void music_manager_init(MusicManager *mgr) {
     if (!mgr) return;
 
     memset(mgr, 0, sizeof(MusicManager));
 
     for (int i = 0; i < MUSIC_COUNT; i++) {
-        mgr->tracks[i] = LoadMusicStream(music_paths[i]);
+        mgr->tracks[i] = music_load_any(music_paths[i]);
 
         // Check if load succeeded
         if (mgr->tracks[i].ctxData != NULL) {
             mgr->tracks_loaded[i] = 1;
-            SetMusicVolume(mgr->tracks[i], MUSIC_DEFAULT_VOLUME);
+            SetMusicVolume(mgr->tracks[i], 32.0f / 64.0f);  /* FILE.ASM:815 default */
         } else {
             mgr->tracks_loaded[i] = 0;
-            fprintf(stderr, "Warning: Failed to load %s\n", music_paths[i]);
+            fprintf(stderr, "Warning: Failed to load %s (nor its .ogg variant)\n",
+                    music_paths[i]);
         }
     }
 
     mgr->current = MUSIC_BLASTER;
     mgr->initialized = 1;
-    mgr->music_enabled = 1;
+    mgr->music_volume = 32;   /* FILE.ASM:815 default */
 
     // Start with menu music if loaded
     if (mgr->tracks_loaded[MUSIC_BLASTER]) {
@@ -40,10 +65,14 @@ void music_manager_init(MusicManager *mgr) {
     }
 }
 
-void music_manager_set_enabled(MusicManager *mgr, int enabled) {
+void music_manager_set_volume(MusicManager *mgr, int volume) {
     if (!mgr || !mgr->initialized) return;
-    mgr->music_enabled = enabled;
-    float vol = enabled ? MUSIC_DEFAULT_VOLUME : 0.0f;
+    if (volume < 0)  volume = 0;
+    if (volume > 64) volume = 64;
+    mgr->music_volume = volume;
+    /* MAIN.ASM:676-677  mov user_volume,al / mov master_volume,al — the level
+     * is continuous, not a mute toggle. */
+    float vol = (float)volume / 64.0f;
     for (int i = 0; i < MUSIC_COUNT; i++) {
         if (mgr->tracks_loaded[i]) {
             SetMusicVolume(mgr->tracks[i], vol);

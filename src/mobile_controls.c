@@ -2,6 +2,7 @@
 #if defined(BRICKBLASTER_MOBILE)
 
 #include "constants.h"
+#include "input_frame.h"   /* PAUSE_BTN_* — on-screen pause button rect */
 #include <raylib.h>
 #include <string.h>
 
@@ -20,6 +21,10 @@ static int s_game_tap_prev  = 0;
 
 static const Rectangle s_left_rect  = { MC_LEFT_X,  MC_LEFT_Y,  MC_LEFT_W,  MC_LEFT_H  };
 static const Rectangle s_right_rect = { MC_RIGHT_X, MC_RIGHT_Y, MC_RIGHT_W, MC_RIGHT_H };
+/* Pause button (drawn by draw_touch_pause_button, hit in input_frame.c) —
+ * excluded here from game-tap/drag so a pause tap never fires the ball. */
+static const Rectangle s_pause_rect = { PAUSE_BTN_X, PAUSE_BTN_Y,
+                                        PAUSE_BTN_W, PAUSE_BTN_H };
 
 /* Cached letterbox scale — recomputed only when screen size changes */
 static int   s_cached_ww = 0, s_cached_wh = 0;
@@ -71,16 +76,19 @@ void mobile_controls_update(void) {
         float dy = cp.y - MC_FIRE_CY;
         int on_fire  = (dx*dx + dy*dy <= (float)(MC_FIRE_R * MC_FIRE_R));
 
+        int on_pause = CheckCollisionPointRec(cp, s_pause_rect);
+
         if (on_left)  s_left_down  = 1;
         if (on_right) s_right_down = 1;
         if (on_fire)  s_fire_down  = 1;
-        if (!on_left && !on_right && !on_fire) s_game_tap_down = 1;
+        if (!on_left && !on_right && !on_fire && !on_pause) s_game_tap_down = 1;
     }
 }
 
 int mobile_controls_is_control_area(Vector2 canvas_pos) {
     if (CheckCollisionPointRec(canvas_pos, s_left_rect))  return 1;
     if (CheckCollisionPointRec(canvas_pos, s_right_rect)) return 1;
+    if (CheckCollisionPointRec(canvas_pos, s_pause_rect)) return 1;
     float dx = canvas_pos.x - MC_FIRE_CX;
     float dy = canvas_pos.y - MC_FIRE_CY;
     if (dx*dx + dy*dy <= (float)(MC_FIRE_R * MC_FIRE_R)) return 1;

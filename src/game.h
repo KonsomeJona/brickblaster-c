@@ -5,6 +5,32 @@
  * Mirrors the MAIN.ASM frame loop at MAIN.ASM:1061-1175 (label "main:").
  *
  * ============================================================================
+ * FRAME RATE — 1 ASM frame == 1 port frame. Do not reintroduce any scaling.
+ * ============================================================================
+ * The port paces at exactly 1/60 s (main.c) and runs one game_update per
+ * frame. So did the original, and this is now proven rather than assumed:
+ *
+ *   - MAIN.ASM:1099 — the main loop calls `wait_synchro` EXACTLY ONCE per
+ *     iteration, so one iteration is one displayed frame.
+ *   - DRAW.ASM:111-152 — wait_synchro is `ifndef WIN32 / ... / else /
+ *     mov ah,Wait_Vbl / Int_EOS / endif`. The DOS branch (VGA 0x3DA retrace
+ *     poll plus an IRQ-0 `timer_counter >= 8` pacer) is the ELSE-less side.
+ *   - MAKEFILE — the shipped binary is assembled `tasm32 ... /dWIN32` and
+ *     linked `system wineos`. WIN32 IS defined, so the DOS branch is compiled
+ *     OUT and the real pacer is WinEOS `Wait_Vbl`: one frame per vertical
+ *     blank of a 640x480 display = 60 Hz.
+ *   - Blaster.inc:423-424 — 640x480, not mode 13h, so the 70 Hz figure that
+ *     has been quoted for this game does not apply either.
+ *
+ * Earlier revisions multiplied ball speed counters by 3 for a supposed
+ * "ASM 18 fps". 18.2 fps is what the *DOS-only* PIT path would have given
+ * (8 ticks of a 145.6 Hz timer) — code that never shipped. The scaling
+ * tripled every ball speed-up interval: SPEED_DELAI=1500 is 25 s at 60 Hz,
+ * but was 75 s in the port. It is removed. The timing constants only make
+ * sense at 60 Hz anyway: DELAI_OPTION=600 and DELAI_DATTENTE=600 are 10 s
+ * each, and the port already used both 1:1.
+ *
+ * ============================================================================
  * MAIN.ASM frame loop order (main: label, MAIN.ASM:1061)
  * ============================================================================
  *
@@ -219,8 +245,18 @@ typedef struct {
     int          current_option_count; /* countdown timer for active timed powerup (DELAI_OPTION=600) */
     PowerupType  current_option;       /* active timed powerup type, or POWERUP_COUNT if none */
 
+    /* MAIN.ASM:7142  player_current_option dd ? — ONE carried effect per
+     * player, not one per effect. Written for the collector alone
+     * (MAIN.ASM:5689), and reset to Off for BOTH players by every instant
+     * handler and by @@current_option_off (MAIN.ASM:6324-6326).
+     * Paddle size / reverse / gun are DERIVED from this each frame by
+     * sync_paddle_from_option — the ASM has no per-paddle countdowns:
+     * option_small_ship_p, option_large_ship_p and option_reverse_p are all
+     * bare `ret` (MAIN.ASM:6703, 6710, 6717). */
+    PowerupType  player_option[2];     /* [0] = player_1, [1] = player_2 */
+
     /* Pickup text banner — stamped on every apply_powerup, rendered at the
-     * panel_info position (MAIN.ASM:347 last_print + panel_info.sprite_adrs,
+     * panel_info position (MAIN.ASM:6274-6290 last_print + MAIN.ASM:5876-5880 panel_info.sprite_adrs,
      * Blaster.cfg option_text_* strings).  Instant powerups also flash the
      * text for a short duration; timed ones linger roughly current_option_count. */
     int          pickup_text_timer;    /* frames remaining; 0 = hidden */
@@ -263,6 +299,21 @@ typedef struct {
      * 0 = use the compiled-in MONSTER_DELAI_* default. */
     int          cfg_monster_delai[3];
 
+    /* Iter3-H: Per-difficulty Nbs_Change_Speed_Level, injected from
+     * Blaster.cfg:45 (2,3,3) — FILE.ASM:1001-1005 overwrites the compiled-in
+     * change_speed_level_* at cfg load. Read by compute_launch_velocity.
+     * 0 = use the compiled-in CHANGE_SPEED_* macros. */
+    int          cfg_change_speed[3];
+
+    /* Read_File_Config (FILE.ASM:936-1005) also overwrites these scalars, so
+     * an edited Blaster.cfg must reach the game. 0 = keep the compiled
+     * default. The shipped cfg happens to match the macros, which is why the
+     * port got away with ignoring them. */
+    int          cfg_nbs_ball_start;   /* Nbs_Life - 1   FILE.ASM:950-951 */
+    int          cfg_speed_delai;      /* Freq_Change_Speed  FILE.ASM:959 */
+    int          cfg_speed_start[3];   /* Start_Speed    FILE.ASM:993-997 */
+    int          cfg_bonus_extra_life; /* Extra_Life     FILE.ASM:942     */
+
     /* F6-01: Per-powerup per-difficulty spawn frequencies, injected from
      * Blaster.cfg Freq_Option_* (FILE.ASM:962-973 + 1143 struc_options
      * option_easy/medium/hard). Row order matches PowerupType enum.
@@ -301,6 +352,8 @@ typedef struct {
         int x, y;       /* pixel position of destroyed brick centre */
         int frame;      /* 0..BREAK_NBS_ANIM-1 */
         int active;
+        int owner;     /* 0 = P1, 1 = P2 — MAIN.ASM:4183 vs 4306 */
+        int was_iron;  /* 1 if the popped ball was an iron ball  */
     } break_anims[MAX_BREAK_ANIMS];
 
     /* -------------------------------------------------------------------
@@ -378,6 +431,20 @@ void game_set_powerup_spacing(Game *g, const int delai_per_diff[3]);
  * data at FILE.ASM:1130-1132 (600/500/300). Pass NULL to revert to the
  * compiled-in MONSTER_DELAI_* defaults. */
 void game_set_monster_delai(Game *g, const int delai_per_diff[3]);
+
+/* Iter3-H: inject per-difficulty Nbs_Change_Speed_Level from Blaster.cfg:45
+ * ((2,3,3) — FILE.ASM:1001-1005 overwrites the compiled-in 3/4/4 at cfg
+ * load). Index order: [0]=easy, [1]=medium, [2]=hard. Consumed by
+ * compute_launch_velocity as the per-level speed-boost divisor
+ * (MAIN.ASM:5296-5307 mov ecx,change_speed_level_*). Pass NULL to revert
+ * to the CHANGE_SPEED_* macros. Modeled on game_set_powerup_spacing. */
+void game_set_change_speed(Game *g, const int cs[3]);
+
+/* Inject the remaining Blaster.cfg scalars (FILE.ASM:936-1005). Any argument
+ * left at 0 keeps the compiled default. Call it right after game_init: it
+ * re-seeds the life count and bonus threshold that game_init has just set. */
+void game_set_cfg_scalars(Game *g, int nbs_ball_start, int speed_delai,
+                          const int speed_start[3], int bonus_extra_life);
 
 /* F6-01: inject per-powerup per-difficulty spawn frequencies from Blaster.cfg
  * Freq_Option_* (FILE.ASM:962-973). `freq` is indexed [PowerupType][0=easy,

@@ -23,6 +23,7 @@
 #include "font.h"
 #include "assets.h"
 #include "constants.h"
+#include "i18n.h"
 #include "input_gamepad.h"
 #include "letterbox.h"
 #include <raylib.h>
@@ -341,12 +342,13 @@ void editor_draw(EditorState *ed) {
     DrawRectangle(px + 60, py + 20, 24, 16, BRICK_COLORS[ed->sel_color]);
     DrawRectangleLines(px + 60, py + 20, 24, 16, WHITE);
 
-    /* Help text */
+    /* EDITOR.ASM:54-55 prints option_text_editor and nothing else — there is
+     * no key-help line in the original. The two invented cheat-sheet rows the
+     * port used to draw are gone; the 18-char .cfg banner sits at panel_info
+     * like every other option_text_*. */
     if (s_font_ready) {
-        font_draw_string(&s_font, "1-4 color  n/m/i/t/l type  +/- hp",
-                         60, SCREEN_H - 48, WHITE);
-        font_draw_string(&s_font, "s save  f10 xchg  f11 reload  pgup/pgdn lvl  esc",
-                         20, SCREEN_H - 24, WHITE);
+        font_draw_string(&s_font, i18n(STR_OPT_EDITOR),
+                         PANEL_INFO_POS_X, PANEL_INFO_POS_Y, WHITE);
     }
 
     /* Message */

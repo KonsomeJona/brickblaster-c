@@ -38,6 +38,7 @@
 #include "hiscore.h"
 #include "game.h"
 #include "draw.h"
+#include "asm_random.h"  /* 1999 generator — boot init + per-frame tick */
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -121,6 +122,83 @@ static FrameInput         fi;  /* polled once per frame, passed to game_update *
 static int pause_cooldown = 0;
 
 /* -----------------------------------------------------------------------
+ * init_game_session — first-entry game initialisation.
+ * Shared by the ready-overlay path (normal play: ball waits for fire) and
+ * the STATE_PLAYING path (demo: MAIN.ASM:99  "mov game_mode,PLAYING" — the
+ * attract mode enters play directly and never shows the ready overlay).
+ * ----------------------------------------------------------------------- */
+static void init_game_session(void) {
+    /* Re-seed rand() (raylib GetRandomValue backend) at game start.  Only
+     * cosmetic draws outside the ASM (hiscore background) use it now — all
+     * gameplay randomness flows through asm_random, which is deliberately
+     * NOT re-seeded here (the 1999 binary never reseeds after boot). */
+    srand((unsigned int)(GetTime() * 1000000.0));
+    Difficulty diff = (Difficulty)state.difficulte;
+    /* game_mode: 0=solo, 1=coop, 2=dual (versus) — MAIN.ASM cfg. */
+    int gmode = 0;
+    if (state.nbs_player > 1) gmode = state.dual_flag ? 2 : 1;
+    game_init(&game, &assets, &audio, diff, gmode);
+    game.world = state.world;
+    /* Per-world sprite palette. MAIN.ASM:483/491  mov B [file_palette+6],'0'/'1'
+     * patches the palette filename, and FILE.ASM:776-791 Read_Palette swaps the
+     * sprite sheet's 768-byte palette on every world load. */
+    assets_select_world(&assets, state.world);
+    game.control_p2 = state.control_p2;
+    /* P1-ASM-34: inject cfg-derived per-difficulty spawn spacing. */
+    game_set_powerup_spacing(&game, cfg.delai_between_option);
+    /* F3 P1-ASM-36: inject cfg-derived per-difficulty monster delay. */
+    game_set_monster_delai(&game, cfg.monster_delai);
+    /* F6-01: inject cfg-derived per-powerup per-difficulty spawn freqs.
+     * ASM cite: FILE.ASM:965-973 overwrites struc_options option_easy/
+     * medium/hard at cfg load — random_options (MAIN.ASM:5493-5504)
+     * then reads the updated values. */
+    game_set_powerup_freq(&game, cfg.freq_option);
+    /* F2: inject cfg-derived per-difficulty speed-ramp divisor.
+     * ASM cite: FILE.ASM:1001-1005 overwrites change_speed_level_easy/
+     * medium/hard at cfg load; Blaster.cfg:45 ships (2,3,3), NOT the
+     * compiled-in 3/4/4 — without this the port played the 1999 build's
+     * defaults and 60/120 cells of the per-level speed table diverged. */
+    game_set_change_speed(&game, cfg.change_speed_level);
+    /* Read_File_Config (FILE.ASM:936-1005) also overwrites nbs_ball_start
+     * (Nbs_Life minus one, FILE.ASM:950-951), speed_delai, speed_start_* and
+     * bonus_extra_life. The shipped Blaster.cfg carries exactly the compiled
+     * defaults, so this changed nothing until someone edited the file — at
+     * which point the port silently ignored them. */
+    game_set_cfg_scalars(&game, cfg.nbs_ball_start, cfg.speed_delai,
+                         cfg.speed_start, cfg.bonus_extra_life);
+    /* Demo mode: transfer flag so game AI drives the paddle */
+    if (state.demo_flag) game.demo_active = 1;
+    /* Dev test mode: load test level with all brick types */
+    if (state.dev_test) {
+        game.dev_test = 1;
+        game.dev_powerup_cycle = 0;
+        game.lives = BALL_MAX;
+        state.dev_test = 0;  /* consumed */
+    }
+    /* Demo starts on a RANDOM level — MAIN.ASM:1014-1019 (start_new_game,
+     * demo branch):
+     *   mov eax,level_number / dec eax / call get_random / inc eax
+     *   mov current_level,eax
+     * get_random(N) returns 0..N INCLUSIVE (MAIN.ASM:5103-5127: masks then
+     * rejects while eax > N), so dec/get_random/inc yields a level in
+     * 1..level_number (1..40). Normal play always starts on level 1. */
+    {
+        int start_level = 1;
+        if (state.demo_flag) {
+            int n = level_count(game.world);
+            if (n > 0) start_level = asm_get_random(n - 1) + 1;
+        }
+        game_load_level(&game, start_level);
+    }
+    game_spawn_ball(&game);
+    /* MAIN.ASM:99-101  demo entry: mov game_mode,PLAYING — skip the
+     * ready wait entirely. The ball launch itself (fixed velocity
+     * MAIN.ASM:2762-2764  sens_x=+3, sens_y=-4) is handled in game.c. */
+    if (state.demo_flag) game.state = STATE_PLAYING;
+    game_initialized = 1;
+}
+
+/* -----------------------------------------------------------------------
  * UpdateDrawFrame — one iteration of the main loop.
  * Called each frame by emscripten_set_main_loop (web) or the while loop (native).
  * ----------------------------------------------------------------------- */
@@ -128,10 +206,26 @@ static int prev_screen_w = 0, prev_screen_h = 0;
 
 static void UpdateDrawFrame(void) {
 
-#if defined(PLATFORM_WEB)
-    /* Web: poll + swap inside the callback (browser handles frame pacing) */
-    PollInputEvents();
-#endif
+    /* DO NOT REMOVE — this call looks dead but is load-bearing for 1999
+     * parity.  DRAW.ASM:110 (wait_synchro) executes `call calc_random` once
+     * per frame, on EVERY frame of EVERY screen (menu, intro, game...), so
+     * the 1999 generator advances continuously between draws.  Which value
+     * the next get_random call sees therefore depends on HOW MANY FRAMES
+     * elapsed, not just on how many draws were made.  Removing this "unused"
+     * tick would freeze the stream between draws and desynchronise every
+     * random event from the 1999 binary. */
+    asm_calc_random();
+
+    /* Web: no PollInputEvents() here — it runs at the END of the frame, see
+     * SwapScreenBuffer() below. Polling at the top destroyed every input edge
+     * on the browser: JS delivers events BETWEEN frames, so the callback sets
+     * currentButtonState, then a top-of-frame poll copies previous = current
+     * before the game ever reads it. IsMouseButtonPressed / IsKeyPressed /
+     * GetMouseDelta were dead 100% of the time — the web build was unplayable
+     * with a mouse or keyboard since the very first commit, while touch kept
+     * working because input_frame.c does its own edge detection.
+     * Native desktop is unaffected: glfwPollEvents() pumps events during the
+     * poll, i.e. after the copy. */
 
 #if defined(BRICKBLASTER_MOBILE)
     /* Foldable cover screen or unexpected portrait layout — pause everything
@@ -174,11 +268,11 @@ static void UpdateDrawFrame(void) {
 #endif
 
     /* Sync audio enable flags from screen state every frame */
-    audio.sfx_enabled = state.sfx_enabled;
-    static int prev_music_enabled = 1;
-    if (state.music_enabled != prev_music_enabled) {
-        music_manager_set_enabled(&music, state.music_enabled);
-        prev_music_enabled = state.music_enabled;
+    audio.sfx_volume = state.sfx_volume;
+    static int prev_music_volume = -1;
+    if (state.music_volume != prev_music_volume) {
+        music_manager_set_volume(&music, state.music_volume);
+        prev_music_volume = state.music_volume;
     }
 
     /* Update music based on current state (BEFORE music_manager_update) */
@@ -196,9 +290,13 @@ static void UpdateDrawFrame(void) {
                        state.game_mode == STATE_PAUSED ||
                        state.game_mode == STATE_READY_TO_PLAY ||
                        state.game_mode == STATE_READY_TO_PLAY_AGAIN);
+        /* P2 on the keyboard shares A/D with P1's aliases — see
+         * frame_input_poll. control_p2 == 1 is the keyboard mode
+         * (input_frame.c frame_input_poll_p2). */
+        const int p2_keyboard = (state.nbs_player > 1 && state.control_p2 == 1);
         frame_input_poll(&fi, state.drag_enabled, state.tilt_enabled,
                          state.button_speed, state.tilt_speed,
-                         0, in_game);
+                         0, in_game, p2_keyboard);
 
 #if defined(UWP_BUILD)
         /* DIAGNOSTIC: every 60 frames during PLAYING, dump input + paddle
@@ -230,7 +328,9 @@ static void UpdateDrawFrame(void) {
             if (state.control_p2 == 0 && game_initialized)
                 demo_ai_player_2(&game, &fi);
         }
-        /* Pause: P key, ESC, gamepad Start — no on-screen button (original). */
+        /* Pause: P key, ESC, gamepad Start, or the on-screen touch button
+         * (hit-tested inside frame_input_poll when the touch UI is active —
+         * see PAUSE_BTN_* / input_touch_ui_active in input_frame.h). */
     }
 
     /* -----------------------------------------------------------
@@ -242,14 +342,51 @@ static void UpdateDrawFrame(void) {
 
     if (state.game_mode == STATE_NEW_PLAY && game_initialized) {
         game.level_num++;
-        if (game.level_num > LEVELS_PER_FILE) {
-            /* All 80 levels done — victory! */
-            state.game_mode = STATE_FINAL;
-        } else {
+        /* MAIN.ASM:912-929  next_level:
+         *   inc current_level / mov eax,current_level
+         *   cmp eax,level_number / jbe _next_level
+         *   ...  call display_score_from_final     ; past the last level
+         * level_number is the PLAYABLE count from search_level_number
+         * (MAIN.ASM:5025-5041, stops at the first 0xFF block) — 40 per
+         * world, NOT the 80-slot file capacity. */
+        int total = level_count(game.world);
+        if (total < 1) total = 1;   /* missing file: end campaign now */
+        if (game.level_num > total) {
+            /* MAIN.ASM:920-932  next_level, past the last level:
+             *   cmp game_mode,EDIT / je @@ok
+             *   cmp computer_flag,On / je @@cont
+             *   cmp demo_flag,On / je @@ok
+             * @@cont: call display_score_from_final    ; victory
+             * @@ok:   mov current_level,1              ; demo wraps to level 1
+             * The demo never triggers the victory sequence — it loops. */
+            if (state.demo_flag) {
+                game.level_num = 1;
+            } else {
+                /* All playable levels done — victory! */
+                state.game_mode = STATE_FINAL;
+            }
+        }
+        if (state.game_mode != STATE_FINAL) {
             game_load_level(&game, game.level_num);
             game_spawn_ball(&game);
-            game.state      = STATE_READY_TO_PLAY;
-            state.game_mode = STATE_READY_TO_PLAY;
+            /* MAIN.ASM:961-967  _next_level:
+             *   cmp demo_flag,On / je @@cont     ; skips...
+             * @@ok: mov game_mode,READY_TO_PLAY  ; ...this
+             * @@cont: jmp start_game
+             * — the demo NEVER re-enters READY_TO_PLAY between levels; then
+             * Init_First_Ball (MAIN.ASM:2750-2751 cmp demo_flag,On / je @@demo,
+             * @@demo at 2761-2771) launches the ball(s) at fixed velocity and
+             * game_mode stays PLAYING. game_spawn_ball() already performs the
+             * @@demo launch when demo_active; without this branch the demo
+             * froze in READY (game_update returns early and the AI never
+             * presses fire). */
+            if (state.demo_flag) {
+                game.state      = STATE_PLAYING;
+                state.game_mode = STATE_PLAYING;
+            } else {
+                game.state      = STATE_READY_TO_PLAY;
+                state.game_mode = STATE_READY_TO_PLAY;
+            }
         }
     }
 
@@ -412,39 +549,17 @@ static void UpdateDrawFrame(void) {
             play_again_timer = PLAY_AGAIN_FRAMES;
         }
         /* Initialize game on first entry from menu */
-        if (!game_initialized) {
-            /* Re-seed rand() at game start using high-res timer.
-             * MAIN.ASM uses CPU timer ticks so each new game is different.
-             * time() only has 1s resolution; GetTime() gives sub-ms precision. */
-            srand((unsigned int)(GetTime() * 1000000.0));
-            Difficulty diff = (Difficulty)state.difficulte;
-            /* game_mode: 0=solo, 1=coop, 2=dual (versus) — MAIN.ASM cfg. */
-            int gmode = 0;
-            if (state.nbs_player > 1) gmode = state.dual_flag ? 2 : 1;
-            game_init(&game, &assets, &audio, diff, gmode);
-            game.world = state.world;
-            game.control_p2 = state.control_p2;
-            /* P1-ASM-34: inject cfg-derived per-difficulty spawn spacing. */
-            game_set_powerup_spacing(&game, cfg.delai_between_option);
-            /* F3 P1-ASM-36: inject cfg-derived per-difficulty monster delay. */
-            game_set_monster_delai(&game, cfg.monster_delai);
-            /* F6-01: inject cfg-derived per-powerup per-difficulty spawn freqs.
-             * ASM cite: FILE.ASM:965-973 overwrites struc_options option_easy/
-             * medium/hard at cfg load — random_options (MAIN.ASM:5493-5504)
-             * then reads the updated values. */
-            game_set_powerup_freq(&game, cfg.freq_option);
-            /* Demo mode: transfer flag so game AI drives the paddle */
-            if (state.demo_flag) game.demo_active = 1;
-            /* Dev test mode: load test level with all brick types */
-            if (state.dev_test) {
-                game.dev_test = 1;
-                game.dev_powerup_cycle = 0;
-                game.lives = BALL_MAX;
-                state.dev_test = 0;  /* consumed */
-            }
-            game_load_level(&game, 1);
-            game_spawn_ball(&game);
-            game_initialized = 1;
+        if (!game_initialized) init_game_session();
+
+        /* Pause from the ready overlay (P / gamepad Start / on-screen touch
+         * button). game.state is deliberately NOT touched — it stays
+         * READY_TO_PLAY(_AGAIN), so resuming returns to the ready wait
+         * instead of force-launching the ball. This is the touch player's
+         * only route to the pause overlay's EXIT before launching. */
+        if (fi.pause_pressed) {
+            state.game_mode = STATE_PAUSED;
+            pause_cooldown  = PAUSE_COOLDOWN_FRAMES;
+            break;
         }
 
         game_update(&game, &fi);
@@ -462,6 +577,7 @@ static void UpdateDrawFrame(void) {
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
+        draw_touch_pause_button();   /* no-op unless touch UI active */
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
@@ -474,6 +590,11 @@ static void UpdateDrawFrame(void) {
      * MAIN.ASM:1061-1175
      * --------------------------------------------------------------- */
     case STATE_PLAYING: {
+        /* Demo entry lands here DIRECTLY from the menu without passing
+         * through the ready overlay (MAIN.ASM:99  mov game_mode,PLAYING) —
+         * initialise the session on demand. */
+        if (!game_initialized) init_game_session();
+
         /* Pause: P key, gamepad Start, or pause button. */
         if (fi.pause_pressed) {
             game.state      = STATE_PAUSED;
@@ -497,11 +618,14 @@ static void UpdateDrawFrame(void) {
             game.state == STATE_READY_TO_PLAY_AGAIN);
         /* Hint text removed — control mode help is in pause menu */
 #endif
+        /* On-screen pause button: touch players have no P/ESC — without it
+         * pause (and thus exit) is unreachable until game over. Hidden in
+         * attract mode (any tap should exit the demo, not pause it). */
+        if (!state.demo_flag) draw_touch_pause_button();
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
         draw_canvas_to_screen(&dc, &game);
-        /* Original: no on-screen pause button */
         FINISH_DRAWING();
         break;
     }
@@ -513,7 +637,8 @@ static void UpdateDrawFrame(void) {
     case STATE_PAUSED: {
         /* Cooldown: ignore all unpause input for the first N frames after pausing.
          * Prevents the same tap that triggered pause from immediately unpausing. */
-        /* Handle music/sfx toggle + resume/exit button taps every frame */
+        /* Handle music/sfx toggle + resume/exit button taps every frame.
+         * Returns 0=nothing, 1=resume tapped, 2=audio-toggle tap consumed. */
         int resume_pressed = pause_handle_input(&state, &fi);
         /* EXIT may have changed state to STATE_MENU — don't override it */
         if (state.game_mode != STATE_PAUSED) break;
@@ -537,16 +662,20 @@ static void UpdateDrawFrame(void) {
 
         if (pause_cooldown > 0) {
             pause_cooldown--;
-        } else if (resume_pressed ||
-                   (!audio_toggle_frame && GetKeyPressed() != 0) ||
-                   fi.click_pressed ||
-                   fi.pause_pressed ||
-                   gamepad_confirm() || gamepad_back()
+        } else if (resume_pressed == 1 ||
+                   (resume_pressed == 0 &&
+                    ((!audio_toggle_frame && GetKeyPressed() != 0) ||
+                     fi.click_pressed ||
+                     fi.pause_pressed ||
+                     gamepad_confirm() || gamepad_back()))
         ) {
             /* MAIN.ASM:1265-1271 @@wait: resume on ANY key (`cmp B [ebp+all],Off`)
-             * OR on mouse click (`call read_click`). */
-            game.state      = STATE_PLAYING;
-            state.game_mode = STATE_PLAYING;
+             * OR on mouse click (`call read_click`).
+             * Resume to whatever the game was doing when paused: PLAYING
+             * normally, but READY_TO_PLAY(_AGAIN) when paused from the ready
+             * overlay (game.state was left untouched there). */
+            if (game.state == STATE_PAUSED) game.state = STATE_PLAYING;
+            state.game_mode = game.state;
         }
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
@@ -554,11 +683,11 @@ static void UpdateDrawFrame(void) {
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
+        draw_touch_pause_button();   /* stays put — tapping it resumes */
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
         draw_canvas_to_screen(&dc, &game);
-        /* Original: no on-screen pause button (unpause via P/ESC/Start) */
         FINISH_DRAWING();
         break;
     }
@@ -581,13 +710,25 @@ static void UpdateDrawFrame(void) {
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
         {
-            int winner = -1;
+            /* HISCORE.ASM:133-140  Display_score @@exit (dual):
+             *   mov eax,' eno'                          ; "one "
+             *   cmp player_2.player_nbs_ball,-1
+             *   je @@ok
+             *   mov eax,' owt'                          ; "two "
+             * @@ok: mov D winner,eax
+             * The original tests ONLY P2's counter: P1 wins iff P2 hit -1,
+             * otherwise P2 wins. There is NO draw case — elimination is
+             * asymmetric (once one player triggers game over, the other's
+             * counter stops decrementing), so exactly one survivor exists. */
             if (game.game_mode == 2) {
-                if (game.lives < 0 && game.lives_2 >= 0) winner = 1;
-                else if (game.lives_2 < 0 && game.lives >= 0) winner = 0;
+                /* HISCORE.ASM:106-141  Display_score with dual_flag On: the
+                 * final_dual panel with the winner label patched in — this is
+                 * the duel result screen, not an overlay banner. */
+                final_draw_dual_gameover(&game);
+            } else {
+                draw_game_over_screen(&state, &game_over_timer,
+                                      game.game_mode, -1);
             }
-            draw_game_over_screen(&state, &game_over_timer,
-                                  game.game_mode, winner);
         }
         EndTextureMode();
         BeginDrawing();
@@ -619,26 +760,34 @@ static void UpdateDrawFrame(void) {
             /* Coop mode 1: combined score P1+P2 (dual handled by early break above). */
             int hs_score = game.score;
             if (game.game_mode == 1) hs_score = game.score + game.score_2;
+            /* HISCORE.ASM:178-212  _Display_score runs Load_Score →
+             * detect_new_score → print_score UNCONDITIONALLY: the table is
+             * always shown after a game. Only the NAME ENTRY is conditional —
+             * detect_new_score leaves name_adrs = Off when the score does not
+             * qualify (HISCORE.ASM:235-237) and Get_name then falls straight
+             * to @@end (HISCORE.ASM:281-282, 341-344 `mov ecx,-1 / wait_click`),
+             * i.e. the table sits there until the player clicks. */
             if (hiscore_qualifies(&hiscores, hs_mode, hs_score)) {
                 int rank = hiscore_insert(&hiscores, hs_mode, "???????????????",
                                           hs_score, game.level_num);
                 hiscore_screen.entry_rank = (rank >= 0) ? rank : 0;
                 hiscore_screen.name_entry_active = 1;
                 hiscore_screen.name_entry_pos = 0;
-                /* HISCORE.ASM:291-294 - Get_name fills all 15 slots with ' ' before input.
-                 * letter value 26 = space. */
-                for (int _li = 0; _li < HISCORE_NAME_LEN; _li++)
-                    hiscore_screen.letter_values[_li] = 26;
-                state.hiscore_mode = hs_mode;
-                state.game_mode = STATE_HISCORE;
-                /* Drain any key still held from the game-over skip press —
-                 * without this, ENTER stays HELD into the hiscore screen and
-                 * IsKeyPressed(KEY_ENTER) only fires on the next release+press,
-                 * making the confirm button look broken. */
-                input_wait_click_release();
+                /* HISCORE.ASM:291-294 — blank all 15 slots before input. */
+                hiscore_blank_name_entry(&hiscore_screen);
             } else {
-                state.game_mode = STATE_MENU;
+                hiscore_screen.name_entry_active = 0;   /* table only */
             }
+            state.hiscore_mode      = hs_mode;
+            /* MAIN.ASM:4689  mov game_mode,NEW_PLAY — after the table the
+             * original starts a FRESH game, it does not return to the menu. */
+            state.hiscore_from_game = 1;
+            state.game_mode         = STATE_HISCORE;
+            /* Drain any key still held from the game-over skip press —
+             * without this, ENTER stays HELD into the hiscore screen and
+             * IsKeyPressed(KEY_ENTER) only fires on the next release+press,
+             * making the confirm button look broken. */
+            input_wait_click_release();
         }
         break;
 
@@ -674,6 +823,9 @@ static void UpdateDrawFrame(void) {
 
 #if defined(PLATFORM_WEB)
     SwapScreenBuffer();
+    /* Poll AFTER the swap: an edge posted by a JS callback between two frames
+     * then survives until the next frame reads it. */
+    PollInputEvents();
 #endif
 }
 
@@ -693,7 +845,16 @@ int main(void) {
      * path which sets a viewport larger than the EGL surface, clipping all
      * rendered geometry while glClear still writes (OpenGL spec — clear
      * ignores the viewport). */
-    srand((unsigned int)time(NULL));  /* seed RNG so powerups vary each session */
+    srand((unsigned int)time(NULL));  /* seeds raylib's GetRandomValue backend
+                                       * (cosmetic draws only, e.g. hiscore
+                                       * background) — game randomness now
+                                       * comes from asm_random */
+
+    /* MAIN.ASM:46  call init_random — boot-time init of the 1999 generator.
+     * Deliberately UNSEEDED: the CMOS reads in init_random are commented out
+     * in the shipped sources, so every 1999 session starts from the same
+     * state.  Behaviour parity reproduces that (see asm_random.c). */
+    asm_random_reset();
 
 #if !defined(PLATFORM_ANDROID) && !defined(PLATFORM_WEB)
     /* MSIX/Start-menu activation hands us an arbitrary CWD (typically
@@ -706,7 +867,38 @@ int main(void) {
 #if defined(PLATFORM_ANDROID)
     InitWindow(0, 0, "Blaster");
 #else
+#if !defined(PLATFORM_WEB)
+    /* Resizable window: letterbox.h projects the 640x480 canvas onto any
+     * window size, so free resizing is safe — and required on displays where
+     * the fixed 1280x960 doesn't fit (MacBook effective resolutions 1280x832
+     * / 1440x900 leave the bottom of the playfield under the Dock). */
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+#endif
     InitWindow(WINDOW_W, WINDOW_H, "Blaster");
+#endif
+#if !defined(PLATFORM_ANDROID) && !defined(PLATFORM_WEB)
+    /* Clamp the initial window to the monitor's usable area. raylib exposes
+     * the full monitor size but not the OS work area, so reserve a fixed
+     * margin for menu bar / title bar / Dock / taskbar and shrink at 4:3.
+     * On monitors where 1280x960 already fits, nothing changes. */
+    {
+        int mon = GetCurrentMonitor();
+        int mon_w   = GetMonitorWidth(mon);
+        int mon_h   = GetMonitorHeight(mon);
+        int avail_w = mon_w - 32;
+        int avail_h = mon_h - 96;
+        if (avail_w > 0 && avail_h > 0 &&
+            (WINDOW_W > avail_w || WINDOW_H > avail_h)) {
+            float s  = (float)avail_w / (float)WINDOW_W;
+            float sh = (float)avail_h / (float)WINDOW_H;
+            if (sh < s) s = sh;
+            int w = (int)(WINDOW_W * s);
+            int h = (int)(WINDOW_H * s);
+            SetWindowSize(w, h);
+            /* Centre horizontally; sit just below the menu bar area. */
+            SetWindowPosition((mon_w - w) / 2, (mon_h - h) / 2 + 16);
+        }
+    }
 #endif
 #if defined(PLATFORM_WEB)
     /* InitWindow sets canvas to WINDOW_W x WINDOW_H, but the resize callback
@@ -730,8 +922,8 @@ int main(void) {
      * Quit is handled via state.quit_requested. */
     SetExitKey(KEY_NULL);
 
-    /* Seed rand() so powerup sequences differ each game.
-     * MAIN.ASM uses a get_random based on timer ticks; we use time(). */
+    /* (Duplicate of the boot-time srand above — kept as-is; it only feeds
+     * raylib's GetRandomValue backend, never the ASM-parity generator.) */
     srand((unsigned int)time(NULL));
     /* Frame pacing is manual via SUPPORT_CUSTOM_FRAME_CONTROL.
      * Do NOT call SetTargetFPS() — it has no effect. */
@@ -784,16 +976,15 @@ int main(void) {
     settings_defaults(&cfg);
     (void)settings_load_cfg(&cfg, "data/blaster.cfg");
 
-    /* P1-ASM-24: restore persisted volume.  The ASM persists two bytes
-     * (User_Volume / User_Volume_Sfx); our .usr stores two floats in
-     * [0..1] range mapped to the state.music_enabled / sfx_enabled flags.
-     * On a missing file the defaults from screen_state_init() apply. */
+    /* P1-ASM-24: restore persisted volumes. FILE.ASM:795-811 Read_Config_User
+     * reads two bytes, each a level 0..64, and FILE.ASM:706-709 copies them
+     * into master_volume / master_volume_sfx. Defaults are the compiled ones
+     * (FILE.ASM:815-816) when the file is missing. */
     {
-        float vm = 1.0f, vs = 1.0f;
-        if (settings_load_usr(&vm, &vs, "data/blaster.usr")) {
-            state.music_enabled = (vm > 0.0f) ? 1 : 0;
-            state.sfx_enabled   = (vs > 0.0f) ? 1 : 0;
-        }
+        int vm = 32, vs = 64;
+        (void)settings_load_usr(&vm, &vs, "data/blaster.usr");
+        state.music_volume = vm;
+        state.sfx_volume   = vs;
     }
 
     /* Start with intro animation */
@@ -854,9 +1045,8 @@ int main(void) {
     /* P1-ASM-24: persist current volume toggles to .usr so they survive a
      * restart — mirrors ASM Write_Config_User (FILE.ASM:822-832). */
     {
-        float vm = state.music_enabled ? 1.0f : 0.0f;
-        float vs = state.sfx_enabled   ? 1.0f : 0.0f;
-        (void)settings_save_usr(vm, vs, "data/blaster.usr");
+        (void)settings_save_usr(state.music_volume, state.sfx_volume,
+                                "data/blaster.usr");
     }
 
     intro_assets_unload(&intro);

@@ -49,16 +49,38 @@ typedef struct {
     int   p2_fire;          /* F key or gamepad1 A */
 } FrameInput;
 
+/* On-screen pause button — canvas coordinates (640x480), top-right margin
+ * (play area ends at x=528; the fire circle starts at y=165, the score panel
+ * ends at x=516 — this rect overlaps neither). Drawn by
+ * draw_touch_pause_button() (screen_overlays.c), hit-tested in
+ * frame_input_poll(), excluded from game-tap/drag in mobile_controls.c.
+ * Only live when input_touch_ui_active() returns 1. */
+#define PAUSE_BTN_X  546
+#define PAUSE_BTN_Y   12
+#define PAUSE_BTN_W   80
+#define PAUSE_BTN_H   52
+
+/* Runtime "touch UI" flag — decides whether on-screen pause/exit tap targets
+ * exist. 1 on the Android mobile build (BRICKBLASTER_MOBILE, compile-time);
+ * on web it latches to 1 the first time a real touch point is seen (the same
+ * page is served to desktop and phone browsers, so a compile-time flag cannot
+ * decide); 0 on desktop and Wear OS. */
+int input_touch_ui_active(void);
+
 /* Poll all input sources and fill the FrameInput struct.
  * Must be called exactly once per frame, before game_update().
  *
  * drag_enabled: 1=finger drag moves paddle (mobile)
  * tilt_enabled: 1=accelerometer tilt moves paddle (mobile)
  * pause_button_hit: 1 if the pause button was tapped (computed by main.c)
- * in_game: 1 if in gameplay state (mouse click = fire); 0 during menus */
+ * in_game: 1 if in gameplay state (mouse click = fire); 0 during menus
+ * p2_uses_keyboard: 1 when player 2 is on the keyboard (Q/A left, D right).
+ *   P1's A/D aliases are then dropped, because A and D would otherwise
+ *   drive both paddles at once. */
 void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
                       int button_speed, int tilt_speed,
-                      int pause_button_hit, int in_game);
+                      int pause_button_hit, int in_game,
+                      int p2_uses_keyboard);
 
 /* Poll P2 input based on control mode.
  * mode: 0=computer (zero input here; main.c calls demo_ai_player_2() after

@@ -13,7 +13,7 @@
 #define CREDITS_FADE_FRAMES  20
 #define CREDITS_HOLD_FRAMES 120
 #define CREDITS_INTRO_FRAMES 36   /* assets/intro/frame_0001..0036.png   */
-#define CREDITS_INTRO_FPS    18.0f /* standard FLC playback rate         */
+#define CREDITS_INTRO_FPS    FLC_FPS   /* animation.h — 5 vsyncs/frame, 60/5 */
 
 typedef enum {
     CREDITS_PHASE_INTRO  = 0,  /* playing intro.flc-equivalent PNG seq  */

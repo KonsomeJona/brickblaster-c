@@ -96,6 +96,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "   game paused    ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "   level editor   ",
     [STR_OPT_PLAY_AGAIN]  = "    play again    ",
     /* Dual-mode winner banners — 18 chars each. FONTE lowercase. */
     [STR_OPT_P1_WINS]     = "   player 1 wins  ",
@@ -211,6 +212,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "       pause      ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "editeur de niveaux",
     [STR_OPT_PLAY_AGAIN]  = "   joue encore    ",
     /* Dual-mode winner banners — FR (no ASM cfg entry, invented).
      * 18 chars each, FONTE lowercase. */
@@ -325,6 +327,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "     pausiert     ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "   level editor   ",
     [STR_OPT_PLAY_AGAIN]  = "   noch einmal    ",
     /* Dual-mode winner banners — DE. 18 chars each. */
     [STR_OPT_P1_WINS]     = "   spieler 1 gew. ",
@@ -409,7 +412,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_M_ONE_PLAYER]    = "un jugador",
     /* Blaster_es.cfg:87-88 — byte-exact (drop final period for COOP, keep
      * spelling `duelo` per cfg). */
-    [STR_M_COOP]          = "2 jugadores cooperado",
+    [STR_M_COOP]          = "2 jugadores cooperado.",
     [STR_M_DUAL]          = "2 jugadores modo duelo",
     [STR_M_CANCEL]        = "retorno",
     [STR_M_COMPUTER]      = "ordenador",
@@ -442,6 +445,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "       pausa      ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "  editor de nivel ",
     [STR_OPT_PLAY_AGAIN]  = "  jugas otra vez  ",
     /* Dual-mode winner banners — ES (no ASM cfg entry, invented).
      * 18 chars each, FONTE lowercase. */
@@ -556,6 +560,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "       pausa      ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "   level editor   ",
     [STR_OPT_PLAY_AGAIN]  = "   ancora gioca   ",
     /* Dual-mode winner banners — IT. 18 chars each. */
     [STR_OPT_P1_WINS]     = " giocatore 1 vince",
@@ -669,6 +674,7 @@ static const char *s_strings[LANG_COUNT][STR_COUNT] = {
     [STR_OPT_PAUSED]      = "       pausa      ",
     [STR_OPT_GAME_OVER]   = "    game over     ",
     [STR_OPT_DEMO]        = "       demo       ",
+    [STR_OPT_EDITOR]      = "   level editor   ",
     [STR_OPT_PLAY_AGAIN]  = "    jogar mais    ",
     /* Dual-mode winner banners — PT. 18 chars each. */
     [STR_OPT_P1_WINS]     = "  jogador 1 vence ",

@@ -46,10 +46,14 @@ typedef struct {
     int control_p2;            // 0=computer, 1=keyboard, 2=joystick (menu 3)
     int difficulte;            // 1=easy, 2=medium, 4=hard
     int hiscore_mode;          // 0=1P, 1=2P
+    /* 1 when the hiscore table was reached from a finished game. MAIN.ASM:4689
+     * sets game_mode = NEW_PLAY there, and @@play_again (MAIN.ASM:1194-1211)
+     * jumps to start_new_game — a brand new game, never the menu. */
+    int hiscore_from_game;
     int quit_requested;        // 1 = exit the main loop
     int dev_test;              // 1 = start in dev test mode (F9)
-    int music_enabled;         // 1 = music on, 0 = music off
-    int sfx_enabled;           // 1 = SFX on,   0 = SFX off
+    int music_volume;          // FILE.ASM:815  User_Volume     — 0..64
+    int sfx_volume;            // FILE.ASM:816  User_Volume_Sfx — 0..64
     int drag_enabled;          // 1=finger drag moves paddle, 0=off (default 1)
     int tilt_enabled;          // 1=accelerometer tilt moves paddle, 0=off (default 0)
     int button_speed;          // Pad button speed: 1=VeryLow..5=VeryHigh (default 3=Med)

@@ -14,6 +14,7 @@
 #include "assets.h"
 #include "constants.h"
 #include "font.h"
+#include "i18n.h"
 #include <raylib.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,7 +22,7 @@
 /* FILE.ASM:164 `mov ecx,417-33` → 384 frames rendered after the first
  * uncompressed keyframe, not 418. P1-ASM-27. */
 #define FINAL_FRAME_COUNT 384
-#define FINAL_FPS 12.0f  /* FILE.ASM:168-170 — 5 vsyncs per frame (60Hz/5 = 12 FPS) */
+#define FINAL_FPS FLC_FPS  /* animation.h — 5 vsyncs/frame, FILE.ASM:164-170 */
 
 /* F4-D7: HISCORE.ASM:52 `mov ecx,-1; call wait_click` → wait INFINITELY
  * until click/key. No auto-advance — must mirror ASM semantics exactly. */
@@ -126,101 +127,161 @@ void final_update(ScreenState *state, FinalAssets *assets, const FrameInput *inp
     }
 }
 
-/* Draw a centred FONTE line at the given y (canvas coords). */
+/* Draw one FONTE line, LEFT-aligned at x = 120.
+ * Print_final (FONTE.ASM:171-184) passes ebx = panel_hiscore_o =
+ * bord_x + screen_x*(bord_y+22) + 8, i.e. x = 112 + 8 = 120, y = 22, and
+ * @@next_ligne (FONTE.ASM:370) does `add esi,4` to skip each row's four-space
+ * prefix. The 27 payload characters then span 120 + 27*15 = 525 < limite_x.
+ * Nothing is centred: the .cfg rows carry their own padding. */
+#define FINAL_TEXT_X       120
+#define FINAL_LINE_PITCH    30   /* FONTE.ASM:416  Fonte_Next_Line = 30 */
+#define FINAL_TEXT_Y0       52   /* 22 + one pitch: final_text itself is a
+                                  * blank row printed before the 13 .cfg rows */
 static void draw_line(const char *s, int y) {
     if (!s_final_font_ready || !s) return;
-    int w = font_string_width(&s_final_font, s);
-    font_draw_string(&s_final_font, s, (SCREEN_W - w) / 2, y, WHITE);
+    font_draw_string(&s_final_font, s, FINAL_TEXT_X, y, WHITE);
 }
 
 /* Render the final_text block (solo/coop) — 13 lines byte-exact from
  * Blaster_en.cfg:112-124. F4-D1: blank padders preserved so vertical
  * layout matches the ASM print_final. */
+/* Blaster.cfg (FR) / Blaster_en.cfg (EN) / Blaster_es.cfg (ES), lines 112-124.
+ * read_text_final (FILE.ASM:1089-1110) overwrites the compiled "+++" frame
+ * with 13 rows of 27 characters taken from the .cfg, so these ARE the shipped
+ * strings. The original has three languages only; DE/IT/PT fall back to EN. */
+static const char *const FINAL_TEXT[3][13] = {
+ /* EN */ { "                           ","                           ",
+            "   thank you for playing   ","       brick blaster       ",
+            "                           ","you have reached the end of",
+            "    this terrible game     ","                           ",
+            "dont't forget to contact us","  at www.eclipse-game.com  ",
+            "                           ","                           ",
+            "                           " },
+ /* FR */ { "                           ","                           ",
+            "                           ","      felicitations !      ",
+            "                           ","                           ",
+            "     vous etes vraiment    ","           un as !!        ",
+            "                           ","   a une prochaine fois    ",
+            "    peut etre dans une     ","     autre dimension!      ",
+            "                           " },
+ /* ES */ { "                           ","                           ",
+            "                           ","         felicidades       ",
+            "                           ","                           ",
+            "        Eres realmente     ","           el mejor        ",
+            "                           ","      Nos vemos quizas     ",
+            "       en otro mundo       ","                           ",
+            "                           " },
+};
+
+/* Blaster*.cfg lines 127-139. Row 6 is patched at runtime by the winner label. */
+static const char *const FINAL_DUAL[3][13] = {
+ /* EN */ { "                           ","                           ",
+            "                           ","         ----------        ",
+            "           winner          ","                           ",
+            "         player ???        ","         ----------        ",
+            "                           ","                           ",
+            "                           ","                           ",
+            "                           " },
+ /* FR */ { "                           ","                           ",
+            "                           ","         ----------        ",
+            "         vainqueur         ","                           ",
+            "         joueur ???        ","         ----------        ",
+            "                           ","                           ",
+            "                           ","                           ",
+            "                           " },
+ /* ES */ { "                           ","                           ",
+            "                           ","         ----------        ",
+            "         vencedor          ","                           ",
+            "         jugador ???       ","         ----------        ",
+            "                           ","                           ",
+            "                           ","                           ",
+            "                           " },
+};
+
+/* EN = 0, FR = 1, ES = 2. The 1999 game shipped exactly these three .cfg. */
+static int final_lang_slot(void) {
+    switch (i18n_get_language()) {
+        case LANG_FR: return 1;
+        case LANG_ES: return 2;
+        default:      return 0;
+    }
+}
+
 static void draw_solo_modal(ScreenState *state) {
     (void)state;
-    ClearBackground((Color){0, 0, 0, 255});
+    /* No ClearBackground — the FLC's last frame stays underneath. */
     if (!s_final_font_ready) return;
-    /* Blaster_en.cfg:112-124 — all 13 entries including blank padders. */
-    static const char *LINES[13] = {
-        "                           ",
-        "                           ",
-        "   thank you for playing   ",
-        "       brick blaster       ",
-        "                           ",
-        "you have reached the end of",
-        "    this terrible game     ",
-        "                           ",
-        "dont't forget to contact us",
-        "  at www.eclipse-game.com  ",
-        "                           ",
-        "                           ",
-        "                           ",
-    };
-    int line_h = FONT_CHAR_H + 4;
-    int count  = (int)(sizeof(LINES) / sizeof(LINES[0]));
-    int y0     = (SCREEN_H - count * line_h) / 2;
-    for (int i = 0; i < count; i++) {
-        draw_line(LINES[i], y0 + i * line_h);
+    const char *const *LINES = FINAL_TEXT[final_lang_slot()];
+    for (int i = 0; i < 13; i++) {
+        draw_line(LINES[i], FINAL_TEXT_Y0 + i * FINAL_LINE_PITCH);
     }
 }
 
 /* Render the final_dual block — byte-exact from Blaster.cfg:127-139.
- * MAIN.ASM:133-138 patches the 4-char `winner` label:
+ * HISCORE.ASM:133-138 patches the 4-char `winner` label:
  *   `mov eax,' eno'` (LE "one ") if P2 lives<0, else `' owt'` ("two ").
  * Final rendered line is "player one " or "player two ". No "wins",
  * no "draw" (F4-D2). ASM only checks P2 lives<0 — if both dead (should
  * not happen per ASM), default to "one". */
 static void draw_dual_modal(Game *game) {
-    ClearBackground((Color){0, 0, 0, 255});
+    /* No ClearBackground — see draw_solo_modal. On the duel game-over path
+     * there is no FLC underneath, so main.c clears the canvas itself. */
     if (!s_final_font_ready) return;
 
-    /* Pick "one" or "two" — mirror MAIN.ASM:133-136 exactly. */
-    const char *who = "one ";
-    if (game && game->lives_2 >= 0) {
-        who = "two ";
-    }
+    /* HISCORE.ASM:133-138 writes FOUR BYTES at a fixed offset:
+     *     mov eax,' eno'                    ; little-endian "one "
+     *     cmp player_2.player_nbs_ball,-1
+     *     je  @@ok
+     *     mov eax,' owt'                    ; "two "
+     * @@ok: mov D winner,eax
+     * `winner` (FILE.ASM:1171-1172) is final_dual_2 + 6*32 + 20, i.e. index 16
+     * of row 6's 27-character payload. The label is ALWAYS English, whatever
+     * the .cfg language. Blaster_es.cfg has its "???" at index 17-19, so the
+     * Spanish line renders as "jugadorone" — a 1999 bug, reproduced here
+     * rather than silently corrected. */
+    const char *who = (game && game->lives_2 >= 0) ? "two " : "one ";
+    char winner_line[28];
+    memcpy(winner_line, FINAL_DUAL[final_lang_slot()][6], 27);
+    winner_line[27] = '\0';
+    memcpy(winner_line + 16, who, 4);
 
-    /* Compose "         player one        " (27 chars to match ASM width). */
-    char winner_line[32];
-    snprintf(winner_line, sizeof(winner_line), "         player %s       ", who);
-
-    /* Blaster_en.cfg:127-139 — 13 lines, byte-exact. */
-    static const char *LINES[13] = {
-        "                           ",
-        "                           ",
-        "                           ",
-        "         ----------        ",
-        "           winner          ",
-        "                           ",
-        NULL,  /* patched with "player one" / "player two" at index 6 */
-        "         ----------        ",
-        "                           ",
-        "                           ",
-        "                           ",
-        "                           ",
-        "                           ",
-    };
-    int line_h = FONT_CHAR_H + 4;
-    int count  = 13;
-    int y0     = (SCREEN_H - count * line_h) / 2;
-    for (int i = 0; i < count; i++) {
-        const char *s = (i == 6) ? winner_line : LINES[i];
-        draw_line(s, y0 + i * line_h);
+    const char *const *LINES = FINAL_DUAL[final_lang_slot()];
+    for (int i = 0; i < 13; i++) {
+        draw_line((i == 6) ? winner_line : LINES[i],
+                  FINAL_TEXT_Y0 + i * FINAL_LINE_PITCH);
     }
 }
+
 
 void final_draw(FinalAssets *assets) {
     if (!assets) return;
     if (!assets->loaded) return;
-    if (assets->phase == FINAL_PHASE_ANIM) {
-        animation_draw(&assets->final_anim, 0, 0);
-    }
+    /* Also draw during the modal phase: HISCORE.ASM:36-44 restores the
+     * palette and calls init_palette but never clears the frame buffer, and
+     * Print_final runs with `transparence = On` (FONTE.ASM:177) — the text
+     * lands on top of the FLC's last frame, not on black. */
+    animation_draw(&assets->final_anim, 0, 0);
 }
 
 void final_draw_modal(FinalAssets *assets, ScreenState *state, Game *game) {
     if (!assets || !state) return;
     if (assets->phase != FINAL_PHASE_MODAL) return;
     ensure_font();
-    if (state->dual_flag) draw_dual_modal(game);
-    else                  draw_solo_modal(state);
+    /* HISCORE.ASM:28-29  Display_score_from_final (the VICTORY path, reached
+     * from next_level at MAIN.ASM:928) opens with
+     *     cmp dual_flag,On / je @@exit
+     * so a duel that clears the last level shows the FLC and nothing after it.
+     * final_dual belongs to the other entry point, Display_score
+     * (HISCORE.ASM:106-141), which test_game_over calls at MAIN.ASM:4687 —
+     * i.e. at duel GAME OVER. The port had the two swapped. */
+    if (state->dual_flag) return;
+    draw_solo_modal(state);
+}
+
+/* Duel game over panel — HISCORE.ASM:106-141 Display_score with dual_flag On:
+ * no FLC, no hiscore table, just the final_dual block with the winner label
+ * patched in. Called directly by main.c on the duel game-over path. */
+void final_draw_dual_gameover(Game *game) {
+    ensure_font();
+    draw_dual_modal(game);
 }

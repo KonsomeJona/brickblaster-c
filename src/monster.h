@@ -37,9 +37,17 @@ typedef struct {
     int active;         /* 1 = alive and moving */
     int exploding;      /* 1 = explosion animation playing */
     int anim_frame;     /* current animation frame (0..15) */
-    int anim_timer;     /* ticks until next frame (counts down from MONSTER_SPEED) */
+    int anim_timer;     /* ticks until next frame (counts down from MONSTER_SPEED).
+                         * During explosion it plays the ASM's shared
+                         * sprite_current_speed: reset to EXPLO_SPEED (1) by
+                         * monster_kill (MAIN.ASM:3081-3082), so the explosion
+                         * advances one frame every 2 screen frames
+                         * (DRAW.ASM:388-392). */
     int explo_frame;    /* explosion animation frame (0..12) */
-    int explo_timer;    /* ticks until explosion finishes */
+    int explo_shape;    /* sprite_current_shape — counts DOWN 13..1, drives the
+                         * reset/advance branch at DRAW.ASM:403-416. Starts at 1
+                         * (MAIN.ASM:3080) so the first advance resets to frame 0. */
+    int explo_timer;    /* sprite_to_delete — stops the explosion at 1, not 0 */
     int variant;        /* 0-3: which sprite row (set by init_monster) */
     int top_bounce_ctr; /* sprite_counter_3: top-wall bounce delay (MAIN.ASM:3113-3122) */
 } Monster;
@@ -58,6 +66,16 @@ void monster_init_level(Monster *monsters, int level_num);
  * compiled-in MONSTER_DELAI_* defaults. Indices 0/1/2 = easy/medium/hard. */
 int monster_create(Monster *monsters, int *spawn_counter, Difficulty diff,
                    const int delai_override[3]);
+
+/* Spawn a monster IMMEDIATELY, bypassing the periodic spawn gate.
+ * option_add_monster_p (MAIN.ASM:6765-6769) calls add_monster directly;
+ * Add_Monster (MAIN.ASM:2978) still resets the periodic counter first
+ * (MAIN.ASM:2981  mov counter_monster,Off), so *spawn_counter is zeroed here
+ * too. Same signature as monster_create (contract with game.c); diff and
+ * delai_override are ignored.
+ * Returns 1 if a monster was spawned, 0 if all slots are full. */
+int monster_add_now(Monster *monsters, int *spawn_counter, Difficulty diff,
+                    const int delai_override[3]);
 
 /* Per-frame update for all monsters: move, animate.
  * Wall bouncing and brick collision are handled externally in game_update.

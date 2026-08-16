@@ -33,6 +33,7 @@ typedef enum {
      * Match Blaster_en.cfg option_text_* — pre-centred inside the 270 px
      * panel_info (18 chars × 15 px). */
     STR_OPT_READY, STR_OPT_PAUSED, STR_OPT_GAME_OVER, STR_OPT_DEMO,
+    STR_OPT_EDITOR,   /* Blaster*.cfg:51  option_text_editor — EDITOR.ASM:54 */
     STR_OPT_PLAY_AGAIN,
     /* Dual-mode winner banners — ASM has no cfg entry (dual added in C).
      * 18 chars each, FONTE lowercase. */

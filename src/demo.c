@@ -73,6 +73,36 @@ void demo_update_paddle(Game *g) {
 
     /* Apply play area clamp — MOUSE.ASM:55-68  after move, clamp to [PLAY_X1..PLAY_X2-w] */
     paddle_clamp(&g->paddle);
+
+    /* MAIN.ASM:5148-5164  demo_move_x_player_2 — the 2-player attract demo
+     * drives cursor_2 the SAME way: snap it under ball_2 every frame.
+     *   cmp demo_flag,On   jne @@ok
+     *   cmp nbs_player,2   jne @@ok
+     *   cmp game_mode,PLAYING jne @@end
+     *   mov eax,ball_2.sprite_pos_x
+     *   mov ebx,cursor_2.sprite_size_x
+     *   shr ebx,1
+     *   sub eax,ebx
+     *   mov cursor_2.sprite_pos_x,eax
+     * This is NOT gated on the "computer P2" menu choice (control_2) — the
+     * demo always pilots cursor_2 itself. The port previously only moved
+     * paddle_2 through demo_ai_player_2, which main.c invokes when
+     * state.control_p2 == 0; the auto-demo leaves control_p2 at its default
+     * (keyboard), so paddle_2 stood still, P2's ball dropped on every serve,
+     * and the coop life-lost path wiped the surviving ball mid-flight —
+     * seen by players as "ball hits a hard brick, vanishes, pad re-serves". */
+    if (g->game_mode > 0 && g->state == STATE_PLAYING) {
+        Ball *p2_ball = NULL;
+        for (i = 0; i < g->ball_count; i++) {
+            Ball *b = &g->balls[i];
+            if (!b->active || b->is_magnetic || b->is_ghost) continue;
+            if (b->owner == 1) { p2_ball = b; break; }
+        }
+        if (p2_ball) {
+            g->paddle_2.x = p2_ball->x - g->paddle_2.w / 2;
+            paddle_clamp(&g->paddle_2);
+        }
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -127,17 +157,36 @@ int demo_check_activate(Game *g) {
 void demo_handle_ball_lost(Game *g) {
     if (!g->demo_active) return;
 
-    /* Respawn ball on paddle centre.
+    /* Respawn ball 1 on paddle centre.
      * MAIN.ASM:5187-5194  ball_x = paddle_x + paddle_w/2 - ball_w/2 */
     ball_init(&g->balls[0],
               g->paddle.x + g->paddle.w / 2 - BALL_W / 2,
               g->paddle.y - BALL_H);
 
-    /* MAIN.ASM:2762-2763  fixed demo ball velocity */
-    g->balls[0].vx         = 3;    /* MAIN.ASM:2762  sprite_sens_x = +3 */
-    g->balls[0].vy         = -4;   /* MAIN.ASM:2763  sprite_sens_y = -4 */
+    /* MAIN.ASM:2762-2764  ball_1: sprite_status On, fixed demo velocity */
+    g->balls[0].vx         = 3;    /* MAIN.ASM:2763  sprite_sens_x = +3 */
+    g->balls[0].vy         = -4;   /* MAIN.ASM:2764  sprite_sens_y = -4 */
     g->balls[0].is_magnetic = 0;
+    g->balls[0].owner       = 0;   /* P1 */
     g->ball_count          = 1;
+
+    /* MAIN.ASM:2766-2770  cmp nbs_player,2 / jne @@end —
+     * a 2-player demo respawns ball_2 too, on paddle_2, mirrored velocity:
+     *   mov ball_2.sprite_status,On
+     *   mov ball_2.sprite_sens_x,-3
+     *   mov ball_2.sprite_sens_y,-4
+     * Without this, the demo's second ship lost its ball forever after the
+     * first miss. game_mode > 0 = the current session is 2-player. */
+    if (g->game_mode > 0) {
+        ball_init(&g->balls[1],
+                  g->paddle_2.x + g->paddle_2.w / 2 - BALL_W / 2,
+                  g->paddle_2.y - BALL_H);
+        g->balls[1].vx          = -3;  /* MAIN.ASM:2769  sprite_sens_x = -3 */
+        g->balls[1].vy          = -4;  /* MAIN.ASM:2770  sprite_sens_y = -4 */
+        g->balls[1].is_magnetic = 0;
+        g->balls[1].owner       = 1;   /* P2 */
+        g->ball_count           = 2;
+    }
 
     g->state = STATE_PLAYING;
 }

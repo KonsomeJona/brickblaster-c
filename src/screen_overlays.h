@@ -50,9 +50,16 @@ void draw_demo_overlay(void);
 void draw_play_again_screen(ScreenState *state);
 
 /* Handle resume/exit input on the pause screen.
- * Returns: 0=nothing, 1=resume requested.
+ * Returns: 0=nothing, 1=resume requested,
+ *          2=input consumed (audio toggle tap — must NOT resume this frame).
  * EXIT sets state->game_mode directly. */
 int pause_handle_input(ScreenState *state, const FrameInput *input);
+
+/* On-screen pause button (canvas coords, rect = PAUSE_BTN_* in input_frame.h).
+ * No-op unless input_touch_ui_active(). Call inside BeginTextureMode(canvas)
+ * on the gameplay states (ready / playing / paused). Hit-testing lives in
+ * frame_input_poll() → FrameInput.pause_pressed. */
+void draw_touch_pause_button(void);
 
 #if defined(BRICKBLASTER_MOBILE)
 int is_screen_too_small(void);

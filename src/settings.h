@@ -54,9 +54,10 @@ void settings_defaults(GameConfig *cfg);
  * Returns 1 on success, 0 if file missing or unreadable. */
 int settings_load_cfg(GameConfig *cfg, const char *path);
 
-/* Load persisted volume from .usr (2 floats, little-endian).
+/* Load persisted volumes from .usr. Two bytes, each a level 0..64 —
+ * FILE.ASM:815-816  User_Volume db 32 / User_Volume_Sfx db 64.
  * Returns 1 on success, 0 on missing/bad file. */
-int settings_load_usr(float *volume, float *volume_sfx, const char *path);
+int settings_load_usr(int *volume, int *volume_sfx, const char *path);
 
-/* Save current volume to .usr (2 floats).  Returns 1 on success. */
-int settings_save_usr(float volume, float volume_sfx, const char *path);
+/* Save current volumes to .usr (2 bytes, 0..64).  Returns 1 on success. */
+int settings_save_usr(int volume, int volume_sfx, const char *path);

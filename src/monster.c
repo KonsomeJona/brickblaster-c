@@ -1,5 +1,5 @@
 #include "monster.h"
-#include "raylib.h"   /* GetRandomValue */
+#include "asm_random.h"  /* 1999 generator — asm_get_random is 0..n INCLUSIVE */
 #include <string.h>   /* memset */
 
 /* --------------------------------------------------------------------------
@@ -13,7 +13,7 @@
 void monster_init_level(Monster *monsters, int level_num)
 {
     int i;
-    int variant = (level_num - 1) & 3;  /* MAIN.ASM:2933  and eax,011b */
+    int variant = (level_num - 1) & 3;  /* MAIN.ASM:2937  and eax,011b */
     for (i = 0; i < NBS_MONSTER; i++) {
         memset(&monsters[i], 0, sizeof(Monster));
         monsters[i].variant = variant;
@@ -37,7 +37,7 @@ void monster_init_level(Monster *monsters, int level_num)
 int monster_create(Monster *monsters, int *spawn_counter, Difficulty diff,
                    const int delai_override[3])
 {
-    int delay, i, idx;
+    int delay, idx;
 
     /* F3 P1-ASM-36: Prefer cfg-injected value (FILE.ASM:985-989 reads
      * Freq_Create_Monster into monster_delai_*). Fall back to compiled
@@ -52,10 +52,36 @@ int monster_create(Monster *monsters, int *spawn_counter, Difficulty diff,
         delay = delai_override[idx];
     }
 
+    /* Spawn gate — MAIN.ASM:2969-2971  inc counter_monster /
+     * cmp counter_monster,eax / jb @@end */
     (*spawn_counter)++;
     if (*spawn_counter < delay) return 0;
 
-    /* Reset counter and spawn — MAIN.ASM:2979  mov counter_monster,Off */
+    /* MAIN.ASM:2972  call add_monster */
+    return monster_add_now(monsters, spawn_counter, diff, delai_override);
+}
+
+/* --------------------------------------------------------------------------
+ * monster_add_now
+ *
+ * Immediate spawn, no periodic gate — mirrors Add_Monster (MAIN.ASM:2978).
+ * option_add_monster_p (MAIN.ASM:6765-6769) calls add_monster directly:
+ *   option_add_monster_p:
+ *     call add_monster
+ *     mov current_option,off
+ * Add_Monster still resets the periodic counter as its first act:
+ *   MAIN.ASM:2981  mov counter_monster,Off
+ * Same signature as monster_create (contract with game.c); diff and
+ * delai_override are unused here.
+ * -------------------------------------------------------------------------- */
+int monster_add_now(Monster *monsters, int *spawn_counter, Difficulty diff,
+                    const int delai_override[3])
+{
+    int i;
+    (void)diff;
+    (void)delai_override;
+
+    /* MAIN.ASM:2981  Add_Monster: mov counter_monster,Off */
     *spawn_counter = 0;
 
     /* Find first inactive slot — MAIN.ASM:2982-2990 */
@@ -65,15 +91,15 @@ int monster_create(Monster *monsters, int *spawn_counter, Difficulty diff,
         /* MAIN.ASM:2996-3035  initialise monster */
         monsters[i].active = 1;
         monsters[i].exploding = 0;
-        monsters[i].vx = 1;   /* MAIN.ASM:3002  mov [edx.sprite_sens_x],1 */
-        monsters[i].vy = 1;   /* MAIN.ASM:3003  mov [edx.sprite_sens_y],1 */
+        monsters[i].vx = 1;   /* MAIN.ASM:2998  mov [edx.sprite_sens_x],1 */
+        monsters[i].vy = 1;   /* MAIN.ASM:2999  mov [edx.sprite_sens_y],1 */
         monsters[i].y  = PLAY_Y1;  /* MAIN.ASM:3001  mov [edx.sprite_pos_y],bord_y */
 
-        /* Random X in play area: MAIN.ASM:3021-3025
-         *   eax = max_x - bord_x = (528-32) - 112 = 384
-         *   call get_random → eax = random(384)
-         *   add eax, bord_x → eax = random + 112 */
-        monsters[i].x = PLAY_X1 + GetRandomValue(0, PLAY_X2 - MONSTER_W - PLAY_X1);
+        /* Random X in play area: MAIN.ASM:3026-3030
+         *   mov eax,[edx.sprite_max_x] / sub eax,bord_x   → 384
+         *   call get_random                               → 0..384 inclusive
+         *   add eax,bord_x                                → 112..496 */
+        monsters[i].x = PLAY_X1 + asm_get_random(PLAY_X2 - MONSTER_W - PLAY_X1);
 
         /* Animation: 16 frames, speed 5 */
         monsters[i].anim_frame = 0;
@@ -98,16 +124,38 @@ void monster_update(Monster *monsters)
     int i;
     for (i = 0; i < NBS_MONSTER; i++) {
         if (monsters[i].exploding) {
-            /* Tick explosion animation.
-             * MAIN.ASM:3064  sprite_to_delete = explo_nbs_anim + 2 = 15 */
+            /* Explosion cadence — DRAW.ASM:388-392 (Refresh_Sprites):
+             *   dec [edx.sprite_current_speed]
+             *   cmp [edx.sprite_current_speed],0
+             *   jns @@next                        → skip while >= 0
+             *   mov eax,[edx.sprite_shape_speed]
+             *   mov [edx.sprite_current_speed],eax → reload
+             * With explo_speed = 1 (Blaster.inc:131, set by Del_Monster
+             * MAIN.ASM:3081-3082) the animation advances one frame every
+             * TWO screen frames. anim_timer plays sprite_current_speed. */
+            monsters[i].anim_timer--;
+            if (monsters[i].anim_timer >= 0) continue;
+            monsters[i].anim_timer = EXPLO_SPEED;  /* reload — DRAW.ASM:391-392 */
+
+            /* sprite_to_delete = explo_nbs_anim + 2 = 15 (MAIN.ASM:3077-3078),
+             * decremented once per animation ADVANCE (DRAW.ASM:394-398).
+             *   dec sprite_to_delete / cmp sprite_to_delete,On / jne @@ok
+             * stops at 1 (On = 1, Blaster.inc:431) — 14 advances, not 15.
+             * Then DRAW.ASM:403-416:
+             *   cmp sprite_current_shape,1 / jbe @@reset
+             *   @@reset: current_adrs = adrs ; current_shape = nbs_shape
+             *   @@inc:   current_adrs += size_x+next_shape ; dec current_shape
+             * current_shape starts at 1 (MAIN.ASM:3080), so the FIRST advance
+             * resets to frame 0 rather than stepping off it. */
             monsters[i].explo_timer--;
-            if (monsters[i].explo_timer <= 0) {
-                monsters[i].exploding = 0;  /* done */
+            if (monsters[i].explo_timer <= 1) {
+                monsters[i].exploding = 0;               /* DRAW.ASM:399-400 */
+            } else if (monsters[i].explo_shape <= 1) {
+                monsters[i].explo_frame = 0;             /* DRAW.ASM:412-413 */
+                monsters[i].explo_shape = EXPLO_NBS_ANIM;/* DRAW.ASM:414-415 */
             } else {
-                /* Advance explosion frame every EXPLO_SPEED frames */
-                monsters[i].explo_frame++;
-                if (monsters[i].explo_frame >= EXPLO_NBS_ANIM)
-                    monsters[i].explo_frame = EXPLO_NBS_ANIM - 1; /* hold last */
+                monsters[i].explo_frame++;               /* DRAW.ASM:406-409 */
+                monsters[i].explo_shape--;
             }
             continue;
         }
@@ -171,7 +219,7 @@ void monster_update(Monster *monsters)
  *
  * MAIN.ASM:3049-3085  Del_Monster:
  *   status = kill; sens = 0; switch to explosion sprite
- *   pos -= 16 (centre 70px explosion over 32px monster)
+ *   pos -= 16 (MAIN.ASM:3059-3060)
  *   to_delete = explo_nbs_anim + 2 = 15
  * -------------------------------------------------------------------------- */
 void monster_kill(Monster *m)
@@ -181,11 +229,19 @@ void monster_kill(Monster *m)
     m->exploding = 1;
     m->vx = 0;
     m->vy = 0;
-    /* Centre explosion: MAIN.ASM:3057-3058  sub pos, 16 */
-    m->x -= (EXPLO_W - MONSTER_W) / 2;  /* 70-32=38, /2=19 ≈ 16 */
-    m->y -= (EXPLO_H - MONSTER_H) / 2;
+    /* MAIN.ASM:3059-3060  sub [edx.sprite_pos_x],16 / sub [edx.sprite_pos_y],16
+     * The ASM shifts by exactly 16 px (not the geometric (70-32)/2 = 19). */
+    m->x -= 16;
+    m->y -= 16;
     m->explo_frame = 0;
-    m->explo_timer = EXPLO_NBS_ANIM + 2;  /* MAIN.ASM:3064  15 frames total */
+    m->explo_shape = 1;                 /* MAIN.ASM:3080  sprite_current_shape = 1 */
+    /* MAIN.ASM:3077-3078  mov sprite_to_delete,explo_nbs_anim / add ..,2 = 15,
+     * consumed one step per animation advance (every 2 frames — see
+     * monster_update). */
+    m->explo_timer = EXPLO_NBS_ANIM + 2;
+    /* MAIN.ASM:3081-3082  sprite_shape_speed = sprite_current_speed =
+     * explo_speed (1). anim_timer doubles as sprite_current_speed. */
+    m->anim_timer = EXPLO_SPEED;
 }
 
 /* --------------------------------------------------------------------------
@@ -193,7 +249,7 @@ void monster_kill(Monster *m)
  *
  * MAIN.ASM:3151-3168  destruction_monster:
  *   For each active monster, call del_monster + play sound.
- * Iter 2 fix #7: SFX (iff_del_monster → MONSTOFF.wav → SFX_POWERUP_LOST) is
+ * Iter 2 fix #7: SFX (iff_del_monster → MONSTOFF.wav → SFX_DEL_MONSTER) is
  * played per-monster inside the loop, mirroring the ASM. Pass NULL to suppress.
  * -------------------------------------------------------------------------- */
 void monster_destroy_all(Monster *monsters, AudioState *audio)
@@ -202,7 +258,7 @@ void monster_destroy_all(Monster *monsters, AudioState *audio)
     for (i = 0; i < NBS_MONSTER; i++) {
         if (monsters[i].active) {
             monster_kill(&monsters[i]);
-            if (audio) audio_play(audio, SFX_POWERUP_LOST);
+            if (audio) audio_play(audio, SFX_DEL_MONSTER);
         }
     }
 }
