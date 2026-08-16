@@ -9,6 +9,8 @@
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
+### ▶️ [**Play it in your browser — Jouer dans le navigateur**](https://konsomejona.github.io/brickblaster-c/) — no install, ~26 MB
+
 ### ⬇️ [**Download the game here — Téléchargez le jeu ici**](https://github.com/KonsomeJona/brickblaster-c/releases/latest) — Windows / Linux / macOS
 
 > **Status: preview.** Gameplay internals (constants, level format, XOR
