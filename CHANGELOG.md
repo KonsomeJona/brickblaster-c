@@ -15,9 +15,18 @@ inside the artefact rather than reading from it.
 
 ## [Unreleased]
 
-Version in `CMakeLists.txt` and `android/app/build.gradle` is already
-`0.1.8`; `v0.1.6` and `v0.1.7` were never tagged. Everything below is
-unreleased and lives on `fix/asm-parity-2026-08`.
+_nothing yet_
+
+---
+
+## [0.2.0] — 2026-08-16
+
+A minor bump rather than a patch: this release changes how the game plays.
+Ball speed-ups ran three times too slow, half the backgrounds were the wrong
+colours, and a player could stack power-up effects the 1999 game never allowed.
+
+`0.1.6` and `0.1.7` were skipped — `0.1.6` has notes below but was never
+tagged, and `0.1.7` never existed.
 
 ### Added
 - **Web (WebAssembly) target** — static Emscripten bundle, `web/shell.html`
@@ -420,8 +429,9 @@ unreleased and lives on `fix/asm-parity-2026-08`.
 ### Licence
 - GPL v3 — inherited from upstream david4599/BrickBlaster.
 
-[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...HEAD
-[0.1.6]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...v0.2.0
+[0.1.6]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.2...v0.1.3

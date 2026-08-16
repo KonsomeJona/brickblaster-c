@@ -12,8 +12,8 @@ android {
         applicationId 'me.takohi.brickblaster'
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName '0.1.8'
+        versionCode 2
+        versionName '0.2.0'
 
         ndk {
             // x86_64 included so the game runs on emulators too.
