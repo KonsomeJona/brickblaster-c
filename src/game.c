@@ -49,7 +49,7 @@
 #endif
 
 /* Forward declarations for static helpers used before their definitions */
-static int compute_speed_level(int level_num);
+static int compute_speed_level(const Game *g, int level_num);
 static PowerupType dev_next_powerup(Game *g);
 static void compute_launch_velocity(const Game *g, int level_num, int *out_vx, int *out_vy);
 static void deactivate_current_option(Game *g);
@@ -178,23 +178,38 @@ static PowerupType pick_powerup_cfg(const Game *g) {
     }
     if (!has_override) return powerup_random_type(g->difficulty);
 
-    /* MAIN.ASM:5472-5477 @@again index draw + last_random reroll — shared
-     * helper (powerup.c) so both cfg and table paths update the single
-     * last_random global.  Draw covers all 24 entries, COLLISION included. */
-    int idx = powerup_draw_index();
+    /* @@again is a LOOP LABEL, not an exit: a frequency of 0 sends the code
+     * back to the index draw (MAIN.ASM:5472 / 5508-5509 `cmp eax,Off / je
+     * @@again`), so a disabled option costs a re-draw rather than cancelling
+     * the spawn. The port used to treat it as "no spawn", which both changed
+     * the odds and consumed a different number of RNG values.
+     * The retry cap is ours: with every frequency at 0 the original spins
+     * forever, and we would rather stay deterministic (same reasoning as
+     * TELEPORT_RETRIES_CAP). */
+    int idx  = POWERUP_COUNT;
+    int freq = 0;
+    for (int tries = 0; tries < 64; tries++) {
+        /* MAIN.ASM:5472-5477 @@again index draw + last_random reroll — shared
+         * helper (powerup.c) so both cfg and table paths update the single
+         * last_random global.  Draw covers all 24 entries, COLLISION included. */
+        idx = powerup_draw_index();
 
-    /* MAIN.ASM:5482-5483  cmp [eax.option_status],Off / je @@end — an option
-     * whose status is Off is skipped.  COLLISION is the only entry left Off by
-     * default; MAIN.ASM:5443-5446 turns it On solely when nbs_player == 2.
-     * Now that the draw covers index 23, solo play must reject it explicitly. */
-    if (idx == POWERUP_COLLISION && g->game_mode == 0) return (PowerupType)POWERUP_COUNT;
+        /* MAIN.ASM:5482-5483  cmp [eax.option_status],Off / je @@end — an
+         * option whose status is Off is skipped.  COLLISION is the only entry
+         * left Off by default; MAIN.ASM:5443-5446 turns it On solely when
+         * nbs_player == 2. Now that the draw covers index 23, solo play must
+         * reject it explicitly. */
+        if (idx == POWERUP_COLLISION && g->game_mode == 0)
+            return (PowerupType)POWERUP_COUNT;
 
-    int freq = g->cfg_freq_option[idx][diff_idx];
+        freq = g->cfg_freq_option[idx][diff_idx];
+        if (freq != 0) break;      /* MAIN.ASM:5508-5509 */
+    }
+    if (freq <= 0) return (PowerupType)POWERUP_COUNT;   /* cap hit */
 
-    /* MAIN.ASM:5506 cmp eax,1 je @@forced */
+    /* MAIN.ASM:5506 cmp eax,1 je @@forced — note this skips get_random
+     * entirely, so a freq-1 option costs no RNG draw. */
     if (freq == 1) return (PowerupType)idx;
-    /* MAIN.ASM:5508 cmp eax,Off je @@again — here we return "no spawn". */
-    if (freq <= 0) return (PowerupType)POWERUP_COUNT;
     /* MAIN.ASM:5510-5513 dec eax; call get_random; or eax,eax; jnz @@end —
      * get_random(freq-1) is 0..freq-1 INCLUSIVE (freq values), spawn iff 0,
      * i.e. probability 1/freq. */
@@ -294,8 +309,8 @@ static void load_dev_test_level(Game *g)
     memset(g->projectiles, 0, sizeof(g->projectiles));
     g->proj_count = 0;
 
-    g->speed_level   = compute_speed_level(1);
-    g->speed_counter = g->speed_level * 3;  /* 3x: compensate for 60fps vs original 18fps */
+    g->speed_level   = compute_speed_level(g, 1);
+    g->speed_counter = g->speed_level;  /* 1 ASM frame = 1 port frame — see the frame-rate note in game.h */
 }
 
 /* --------------------------------------------------------------------------
@@ -304,9 +319,11 @@ static void load_dev_test_level(Game *g)
 
 /* Ball launch speed by difficulty.
  * MAIN.ASM:5295-5307  mov eax,speed_start_*  FILE.ASM:1127-1129 */
-static int speed_start(Difficulty diff) {
-    if (diff == DIFFICULTY_HARD)   return SPEED_START_HARD;
-    if (diff == DIFFICULTY_MEDIUM) return SPEED_START_MEDIUM;
+static int speed_start(const Game *g, Difficulty diff) {
+    int idx = (diff == DIFFICULTY_HARD) ? 2 : (diff == DIFFICULTY_MEDIUM) ? 1 : 0;
+    if (g && g->cfg_speed_start[idx] > 0) return g->cfg_speed_start[idx];
+    if (idx == 2) return SPEED_START_HARD;
+    if (idx == 1) return SPEED_START_MEDIUM;
     return SPEED_START_EASY;
 }
 
@@ -335,8 +352,35 @@ static int change_speed_divisor(const Game *g) {
  *   mov speed_level,edx
  *   sub speed_level,eax         ; eax = (current_level-1)*17
  * → speed_level = speed_delai - (current_level - 1) * 17 */
-static int compute_speed_level(int level_num) {
-    int sl = SPEED_DELAI - (level_num - 1) * 17;
+/* FILE.ASM:936-1005 Read_File_Config overwrites these at load; 0 = default. */
+void game_set_cfg_scalars(Game *g, int nbs_ball_start, int speed_delai,
+                          const int speed_start[3], int bonus_extra_life) {
+    if (!g) return;
+    g->cfg_nbs_ball_start   = nbs_ball_start;
+    g->cfg_speed_delai      = speed_delai;
+    g->cfg_bonus_extra_life = bonus_extra_life;
+    if (speed_start) {
+        int i;
+        for (i = 0; i < 3; i++) g->cfg_speed_start[i] = speed_start[i];
+    }
+    /* game_init has already run by the time main.c calls this, so the two
+     * values it seeds must be re-applied here rather than read lazily. */
+    if (nbs_ball_start > 0) {
+        g->lives   = nbs_ball_start;
+        g->lives_2 = nbs_ball_start;
+    }
+    if (bonus_extra_life > 0) {
+        g->bonus_life_threshold   = bonus_extra_life;
+        g->bonus_life_threshold_2 = bonus_extra_life;
+    }
+}
+
+static int speed_delai_of(const Game *g) {
+    return (g && g->cfg_speed_delai > 0) ? g->cfg_speed_delai : SPEED_DELAI;
+}
+
+static int compute_speed_level(const Game *g, int level_num) {
+    int sl = speed_delai_of(g) - (level_num - 1) * 17;
     if (sl < 1) sl = 1;   /* clamp to at least 1 frame */
     return sl;
 }
@@ -359,7 +403,7 @@ static int compute_speed_level(int level_num) {
  */
 static void compute_launch_velocity(const Game *g, int level_num, int *out_vx, int *out_vy) {
     Difficulty diff = g->difficulty;
-    int spd   = speed_start(diff);               /* MAIN.ASM:5295  eax = speed_start */
+    int spd   = speed_start(g, diff);               /* MAIN.ASM:5295  eax = speed_start */
     int cdiv  = change_speed_divisor(g);          /* MAIN.ASM:5296  ecx = change_speed_level_* (cfg-injected, Iter3-H) */
     int vx    = spd;                             /* MAIN.ASM:5330  ball_1.sprite_sens_x = eax */
     int vy    = -(spd + 1);                      /* MAIN.ASM:5331-5333  inc eax; neg eax → vy */
@@ -403,6 +447,7 @@ static void compute_launch_velocity(const Game *g, int level_num, int *out_vx, i
  * owner's score/life counters are used; in solo/coop both route to
  * player_1's counters per ASM `dual_flag off → ebp=player_1` at FONTE.ASM:89.
  * -------------------------------------------------------------------------- */
+static void clear_all_options(Game *g);
 static void inc_score_raw(Game *g, int owner, int ecx, int recurse_bonus_life);
 
 static void inc_score(Game *g, int owner, int ecx) {
@@ -439,6 +484,12 @@ static void inc_score_raw(Game *g, int owner, int ecx, int recurse_bonus_life) {
              * Recurse without the bonus-life check to avoid infinite loop if the
              * +80 would itself trigger another life. */
             inc_score_raw(g, owner, 8, 0);
+            /* option_new_life_p ends by wiping the option slots for BOTH
+             * players (MAIN.ASM:6441-6443, right after the NBS_BALL_MAX
+             * clamp), so crossing a 10 000-point threshold cancels whatever
+             * effect either player was carrying. The port used to award the
+             * life and leave the slots untouched. */
+            clear_all_options(g);
         }
     }
 }
@@ -474,10 +525,12 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
     g->world      = 0;                    /* default world 0 (Blaster.lv0) */
 
     /* MAIN.ASM:1001-1006  start_new_game: initialise player fields */
-    g->lives      = NBS_BALL_START;       /* FILE.ASM:1137  nbs_ball_start dd 2 */
+    g->lives      = (g->cfg_nbs_ball_start > 0) ? g->cfg_nbs_ball_start
+                                                : NBS_BALL_START;  /* FILE.ASM:950-951, 1137 */
     g->score      = 0;                    /* init_score clears counter */
     g->level_num  = 1;                    /* FILE.ASM:1138  start_level dd 1 */
-    g->bonus_life_threshold = BONUS_EXTRA_LIFE; /* FILE.ASM:1143  bonus_extra_life dd 10000 */
+    g->bonus_life_threshold = (g->cfg_bonus_extra_life > 0) ? g->cfg_bonus_extra_life
+                                                            : BONUS_EXTRA_LIFE; /* FILE.ASM:942, 1143 */
 
     g->state      = STATE_READY_TO_PLAY;  /* MAIN.ASM:118  mov game_mode,READY_TO_PLAY */
 
@@ -486,8 +539,8 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
     g->demo_timer  = DELAI_DEMO;          /* Blaster.inc:420  DELAI_DEMO = 800 */
 
     /* Speed timer for first level */
-    g->speed_level   = compute_speed_level(1);  /* MAIN.ASM:4906-4911 */
-    g->speed_counter = g->speed_level * 3;      /* 3x: compensate for 60fps vs original 18fps */
+    g->speed_level   = compute_speed_level(g, 1);  /* MAIN.ASM:4906-4911 */
+    g->speed_counter = g->speed_level;      /* 1 ASM frame = 1 port frame — see the frame-rate note in game.h */
 
     g->option_spawn_timer = 0;
 
@@ -500,6 +553,8 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
     g->ghost_active       = 0;
     g->current_option_count = 0;
     g->current_option     = POWERUP_COUNT;  /* sentinel: no active timed powerup */
+    g->player_option[0]   = POWERUP_COUNT;
+    g->player_option[1]   = POWERUP_COUNT;
     g->pickup_text_timer  = 0;
     g->pickup_text_type   = POWERUP_COUNT;
 
@@ -528,8 +583,8 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
         g->paddle_2.x  = SCREEN_CENTER - SCREEN_CENTER / 4 - g->paddle_2.w / 2;
     }
     g->score_2 = 0;
-    g->lives_2 = NBS_BALL_START;
-    g->bonus_life_threshold_2 = BONUS_EXTRA_LIFE;
+    g->lives_2 = g->lives;
+    g->bonus_life_threshold_2 = g->bonus_life_threshold;
 
     /* Load default hiscores.
      * hiscore_load would be called externally for saved scores. */
@@ -601,8 +656,21 @@ void game_load_level(Game *g, int level_num) {
 
     /* Recompute speed_level for this level.
      * MAIN.ASM:4906-4911  speed_level = speed_delai - (current_level-1)*17 */
-    g->speed_level   = compute_speed_level(level_num);
-    g->speed_counter = g->speed_level * 3;  /* 3x: compensate for 60fps vs original 18fps */
+    g->speed_level   = compute_speed_level(g, level_num);
+    g->speed_counter = g->speed_level;  /* 1 ASM frame = 1 port frame — see the frame-rate note in game.h */
+
+    /* Keyboard paddle step, same rule as the launch site (MAIN.ASM:5345-5348,
+     * speed_counter = 2 x the ball's launch speed). Derived here too because
+     * the attract mode never passes through READY_TO_PLAY — main.c drops it
+     * straight into PLAYING per MAIN.ASM:961-967 — so the launch site alone
+     * would leave the demo paddles at their init value all round. */
+    {
+        int lv_vx, lv_vy;
+        compute_launch_velocity(g, level_num, &lv_vx, &lv_vy);
+        (void)lv_vy;
+        g->paddle.speed   = 2 * lv_vx;
+        g->paddle_2.speed = 2 * lv_vx;
+    }
 
     /* Reset falling powerups when level changes */
     memset(g->powerups, 0, sizeof(g->powerups));
@@ -623,6 +691,17 @@ void game_load_level(Game *g, int level_num) {
 
     /* Reset break animations */
     memset(g->break_anims, 0, sizeof(g->break_anims));
+
+    /* MAIN.ASM:1042-1043  reset_magnetic / reset_ghost. A level change reaches
+     * start_game the same way a lost life does: _next_level ends with
+     * `jmp start_game` (MAIN.ASM:934-968), so neither the magnet nor ghost
+     * balls carry over into the next board. */
+    g->magnetic_flag = 0;
+    g->ghost_active  = 0;
+    for (i = 0; i < g->ball_count; i++) {
+        g->balls[i].is_magnetic = 0;
+        g->balls[i].is_ghost    = 0;
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -747,11 +826,9 @@ static void deactivate_current_option(Game *g) {
          * @@ok branch (MAIN.ASM:2296-2305). */
         g->collision_flag = 0;
         break;
-    /* POWERUP_SHOOT / MINI_SHOOT / SMALL_SHIP / LARGE_SHIP / REVERSE are NOT
-     * tracked via current_option — they are per-paddle (Paddle.laser_timer /
-     * size_timer / reverse_timer) and ticked down independently in
-     * tick_option_timer, so one paddle collecting a shape/laser does not
-     * cancel the other's active effect. See MAIN.ASM:6491,6500,6509-6603,6562.
+    /* POWERUP_SHOOT / MINI_SHOOT / SMALL_SHIP / LARGE_SHIP / REVERSE need no
+     * case: they live in player_option[] and are re-derived every frame by
+     * sync_paddle_from_option, so clearing the slots below is enough.
      *
      * POWERUP_NIGHT is also not tracked via current_option (see
      * MAIN.ASM:6641-6663 option_night_p / apply_powerup). Night is cleared
@@ -762,7 +839,60 @@ static void deactivate_current_option(Game *g) {
     }
     g->current_option_count = 0;
     g->current_option = POWERUP_COUNT;
+    /* MAIN.ASM:6324-6326  @@current_option_off clears BOTH player slots too. */
+    g->player_option[0] = POWERUP_COUNT;
+    g->player_option[1] = POWERUP_COUNT;
     g->night_active = 0;  /* MAIN.ASM:6684 init_palette clears option_night_flag */
+}
+
+/* MAIN.ASM:6352-6354 — the motif every instant handler repeats:
+ *     mov current_option,Off
+ *     mov player_1.player_current_option,Off
+ *     mov player_2.player_current_option,Off
+ * An instant powerup collected by EITHER player wipes BOTH players' carried
+ * effects. Unlike deactivate_current_option this is silent: the instant
+ * handlers do not play iff_option_off. */
+static void clear_all_options(Game *g) {
+    g->current_option   = POWERUP_COUNT;
+    g->player_option[0] = POWERUP_COUNT;
+    g->player_option[1] = POWERUP_COUNT;
+}
+
+/* MAIN.ASM:1071-1076 — detect_large/small_cursor_player_1/2 and
+ * detect_shoot_player_1/2 run EVERY frame and derive the paddle's entire
+ * state from player_N.player_current_option alone. There is no countdown per
+ * effect: option_small_ship_p / option_large_ship_p / option_reverse_p are
+ * bare `ret` (MAIN.ASM:6703, 6710, 6717), and the count_tir_* values are
+ * muzzle-flash animation counters (MAIN.ASM:1897-1903), not durations.
+ * Consequences that the port previously did not reproduce: a player carries
+ * ONE effect, picking up a second replaces the first, and any instant
+ * powerup strips both players. */
+static void sync_paddle_from_option(Game *g, int who) {
+    Paddle *p     = (who == 1) ? &g->paddle_2 : &g->paddle;
+    PowerupType o = g->player_option[who];
+
+    PaddleSize want = PADDLE_SIZE_NORMAL;
+    if      (o == POWERUP_LARGE_SHIP) want = PADDLE_SIZE_LARGE;  /* MAIN.ASM:2547 */
+    else if (o == POWERUP_SMALL_SHIP) want = PADDLE_SIZE_SMALL;  /* MAIN.ASM:2593 */
+
+    if (p->size != want) {
+        if (want == PADDLE_SIZE_SMALL) {
+            /* MAIN.ASM:2598-2600  push magnetic_flag / call reset_magnetic /
+             * pop magnetic_flag — balls are unstuck, the flag survives. */
+            int keep = g->magnetic_flag;
+            int bi;
+            for (bi = 0; bi < g->ball_count; bi++) g->balls[bi].is_magnetic = 0;
+            g->magnetic_flag = keep;
+        }
+        paddle_set_size(p, want);
+        if (g->audio && want == PADDLE_SIZE_LARGE) audio_play(g->audio, SFX_LARGE_PADDLE);
+        if (g->audio && want == PADDLE_SIZE_SMALL) audio_play(g->audio, SFX_SMALL_PADDLE);
+    }
+
+    p->reversed   = (o == POWERUP_REVERSE);       /* MOUSE.ASM:33  */
+    p->has_gun    = (o == POWERUP_SHOOT || o == POWERUP_MINI_SHOOT); /* MAIN.ASM:1863-1866 */
+    p->mini_laser = (o == POWERUP_MINI_SHOOT);
+    if (!p->has_gun) p->gun_cooldown = 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -824,7 +954,7 @@ static int create_ball_corner_blocked(Game *g, int x, int y) {
     int idx = row * BRICK_COLS + col;       /* imul eax,nbs_brique_x / add   */
     if (idx < 0 || idx >= BRICK_COUNT) return 0;
     if (!g->bricks[idx].active) return 0;
-    /* MAIN.ASM:1722  cmp al,incassable; je @@bad — only exact 0x08 fails. */
+    /* MAIN.ASM:1719  cmp al,incassable; je @@bad — only exact 0x08 fails. */
     return (g->bricks[idx].type == BRICK_INDESTRUCTIBLE) ? 1 : 0;
 }
 
@@ -896,44 +1026,38 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
     int duration = powerup_duration(type);  /* 0=instant, >0=timed, -1=permanent */
     int is_timed = (duration > 0);
 
-    /* Pickup text banner — mirrors MAIN.ASM:347 last_print + panel_info
+    /* Pickup text banner — mirrors MAIN.ASM:6274-6290 last_print + MAIN.ASM:5876-5880 panel_info
      * blit of the option_text_* string. Instant powerups flash for 2s,
      * timed ones mirror the effect duration. */
-    g->pickup_text_type  = type;
-    g->pickup_text_timer = is_timed ? duration : 120;
-    int is_per_paddle_laser = (type == POWERUP_SHOOT || type == POWERUP_MINI_SHOOT);
-    /* Per-paddle size/reverse (MAIN.ASM:6491/6500/6562 option_*_ship_p / option_reverse_p)
-     * — like laser, these run independently per player and do not occupy
-     * the global current_option slot. */
-    int is_per_paddle_shape = (type == POWERUP_SMALL_SHIP ||
-                               type == POWERUP_LARGE_SHIP ||
-                               type == POWERUP_REVERSE);
+    g->pickup_text_type = type;
+    /* The banner clears 100 frames after pickup, whatever the powerup:
+     * detect_current_option_end does
+     *     dec current_option_count
+     *     cmp current_option_count,DELAI_INFO / je @@display_info_off
+     * (MAIN.ASM:6304-6306) with DELAI_INFO = DELAI_OPTION-100 = 500
+     * (Blaster.inc:418), and current_option_count was just armed to 600.
+     * (DELAI_INFO_SOUND is the one that is genuinely dead — its only use,
+     * MAIN.ASM:6307, is commented out.) */
+    g->pickup_text_timer = DELAI_OPTION - DELAI_INFO;
     Paddle *owner_paddle = (g->game_mode > 0 && collected_by == 1) ? &g->paddle_2 : &g->paddle;
+    (void)owner_paddle;   /* still used by a few cases below */
     /* Duel: route score/life events to the collecting player's counters. */
     int *target_score = (g->game_mode == 2 && collected_by == 1) ? &g->score_2 : &g->score;
     int *target_lives = (g->game_mode == 2 && collected_by == 1) ? &g->lives_2 : &g->lives;
 
-    /* Only one (global) timed option can be active at once.
-     * Replacing a timed option must clear the previous effect first.
-     * EXCEPTION: SHOOT / MINI_SHOOT / SMALL_SHIP / LARGE_SHIP / REVERSE are
-     * per-paddle (MAIN.ASM:6491,6500,6509-6603,6562) — they do NOT occupy
-     * current_option and must not wipe any other timed effect nor cancel
-     * the other paddle's effect.
-     * Iter 2 fix #9: MAGNETIC is ALSO per-player via magnetic_flag bitmask
-     * and MUST NOT overwrite current_option (MAIN.ASM:6745-6750 push/pop). */
-    int is_per_player_magnetic = (type == POWERUP_MAGNETIC);
-    if (is_timed && !is_per_paddle_laser && !is_per_paddle_shape
-        && !is_per_player_magnetic
-        && g->current_option_count > 0) {
-        deactivate_current_option(g);
-    }
-
-    /* First clear any conflicting size powerup on the OWNER paddle only —
-     * each size powerup overrides the previous on that paddle. */
-    if (type == POWERUP_SMALL_SHIP || type == POWERUP_LARGE_SHIP) {
-        owner_paddle->size_timer = 0;
-        paddle_set_size(owner_paddle, PADDLE_SIZE_NORMAL);
-    }
+    /* MAIN.ASM:5675-5691  detect_prise_option, in this exact order:
+     *     push current_option / pop old_option      ; 5675-5676
+     *     mov current_option,eax                    ; 5687  global slot
+     *     mov ebx,current_player
+     *     mov [ebx.player_current_option],eax       ; 5689  collector's slot
+     *     mov current_option_count,DELAI_OPTION     ; 5691  SHARED timer re-armed
+     * There is no per-effect and no per-paddle timer anywhere: one slot per
+     * player, one countdown for the pair. */
+    int who = (g->game_mode > 0 && collected_by == 1) ? 1 : 0;
+    PowerupType old_option = g->current_option;
+    g->current_option       = type;
+    g->player_option[who]   = type;
+    g->current_option_count = DELAI_OPTION;
 
     switch (type) {
     /* ------------------------------------------------------------------
@@ -942,30 +1066,28 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * ------------------------------------------------------------------ */
     /* Bring total ball count up to the named target.
      * MAIN.ASM:option_3/6/9/20_ball_p — named by intended total.
-     * FIX: was spawning a fixed extra count, which overshoot when multiple
-     * balls were already active (e.g. collecting 9-ball with 6 already live
-     * gave 14 instead of 9). Now fills up to the target only. */
+     * The names say "3/6/9/20 balls" but the handlers spawn a FIXED extra
+     * count — mov ecx,1 / 3 / 6 at MAIN.ASM:6347 / 6362 / 6377 — which is
+     * what the code below does. An older comment here claimed the opposite
+     * ("fills up to the target only"); that fill-to-target behaviour was
+     * abandoned, only its description survived. */
     case POWERUP_BALL_3:
         /* MAIN.ASM:option_3_ball_p  mov ecx,1; call add_ball — spawns 1 extra */
         spawn_extra_balls(g, 1, collected_by);
-        if (g->audio) audio_play(g->audio, SFX_MULTI_BALL);
         break;
     case POWERUP_BALL_6:
         /* MAIN.ASM:option_6_ball_p  mov ecx,3; call add_ball — spawns 3 extra */
         spawn_extra_balls(g, 3, collected_by);
-        if (g->audio) audio_play(g->audio, SFX_MULTI_BALL);
         break;
     case POWERUP_BALL_9:
         /* MAIN.ASM:option_9_ball_p  mov ecx,6; call add_ball — spawns 6 extra */
         spawn_extra_balls(g, 6, collected_by);
-        if (g->audio) audio_play(g->audio, SFX_MULTI_BALL);
         break;
     case POWERUP_BALL_20:
         /* MAIN.ASM:option_20_ball_p  mov ecx,20; call add_ball
          * add_ball skips active slots without decrementing ecx → fills all
          * inactive slots (up to 20 total). Equivalent to fill-to-max. */
         if (g->ball_count < BALL_MAX + 1) spawn_extra_balls(g, BALL_MAX + 1 - g->ball_count, collected_by);
-        if (g->audio) audio_play(g->audio, SFX_MULTI_BALL);
         break;
 
     /* ------------------------------------------------------------------
@@ -1014,20 +1136,11 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * MAIN.ASM:detect_shoot_player_1  — laser active countdown
      * ------------------------------------------------------------------ */
     case POWERUP_SHOOT:
-        /* MAIN.ASM:6512-6542  option_shoot_p — applies to current_player only.
-         * Strictly per-paddle: setting owner's laser does NOT touch the other
-         * paddle, and does not occupy the global current_option slot. */
-        owner_paddle->laser_timer = (duration > 0) ? duration : DELAI_OPTION;
-        owner_paddle->mini_laser  = 0;    /* big shoot */
-        owner_paddle->has_gun     = 1;
-        owner_paddle->gun_cooldown = 0;
-        break;
     case POWERUP_MINI_SHOOT:
-        /* MAIN.ASM:6557-6603  option_mini_shoot_p — applies to current_player only */
-        owner_paddle->laser_timer = (duration > 0) ? duration : DELAI_OPTION;
-        owner_paddle->mini_laser  = 1;
-        owner_paddle->has_gun     = 1;
-        owner_paddle->gun_cooldown = 0;
+        /* Nothing to do: the slot written at the top of this function IS the
+         * effect. detect_shoot_player_1/2 (MAIN.ASM:1863-1866, 2075-2077)
+         * re-reads player_current_option every frame, which is what
+         * sync_paddle_from_option reproduces. */
         break;
 
     /* ------------------------------------------------------------------
@@ -1044,7 +1157,7 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         for (i = 0; i < g->ball_count; i++) {
             if (!g->balls[i].active) continue;
             /* MAIN.ASM:3417-3418 mov [edx.sprite_speed_counter],speed_level */
-            g->balls[i].speed_counter = g->speed_level * 3;  /* 60fps scaling */
+            g->balls[i].speed_counter = g->speed_level;  /* 1:1 with the ASM frame */
             {
                 /* dec_speed_x: MAIN.ASM:3460-3475 */
                 int min_x = SPEED_MIN_X + g->balls[i].angle;
@@ -1058,7 +1171,6 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
                 else if (g->balls[i].vy < -min_y) g->balls[i].vy++;
             }
         }
-        if (g->audio) audio_play(g->audio, SFX_SPEEDUP);
         break;
     case POWERUP_FAST_BALL:
         /* ONE-SHOT: option_fast_ball_p is an empty handler (MAIN.ASM:6620-6623
@@ -1069,7 +1181,7 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         for (i = 0; i < g->ball_count; i++) {
             if (!g->balls[i].active) continue;
             /* MAIN.ASM:3399-3400 mov [edx.sprite_speed_counter],speed_level */
-            g->balls[i].speed_counter = g->speed_level * 3;  /* 60fps scaling */
+            g->balls[i].speed_counter = g->speed_level;  /* 1:1 with the ASM frame */
             {
                 /* inc_speed_x: MAIN.ASM:3427-3441 clamp at speed_max_x+angle */
                 int lim_x = SPEED_MAX_X + g->balls[i].angle;
@@ -1087,7 +1199,6 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
                     g->balls[i].vy--;
             }
         }
-        if (g->audio) audio_play(g->audio, SFX_SPEEDUP);
         break;
     case POWERUP_IRON_BALL:
         /* Iron ball persists until next level (not timed).
@@ -1121,44 +1232,44 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         break;
     case POWERUP_GHOST:
         /* MAIN.ASM:6776-6790  option_ghost_p:
-         *   mov ecx,20
-         *   cmp nbs_player,2 ; jne @@cont ; mov ecx,10   ← P1-ASM-7: 10 in 2P modes
-         *   call add_ball       → spawn ghost balls
-         *   call set_ghost      → mark collecting player's balls ghost
-         *                         (set_ghost filters by sprite_player==current_player,
-         *                          MAIN.ASM:3343-3348; P1-ASM-12 per-player filter) */
+         *     mov ecx,20
+         *     cmp nbs_player,2 / jne @@cont / mov ecx,10
+         * @@cont:
+         *     call add_ball          ; ordinary spawn — create_ball, RNG and all
+         *     current_option / both player slots := Off
+         *     call set_ghost
+         *
+         * set_ghost (MAIN.ASM:3339-3359) then walks EVERY Ball_N and ghosts
+         * each one owned by current_player that is not already ghosted —
+         * including the balls that were already in flight, not just the ones
+         * just spawned. It ends by calling unghost_one_ball
+         * (MAIN.ASM:3363-3383), which clears the flag on the FIRST ball with
+         * status On belonging to that player and returns immediately.
+         *
+         * The port used to spawn its own balls at a fixed position with a
+         * deterministic velocity fan, ghost only those, and leave the existing
+         * balls normal — a different ghost/normal split AND a different number
+         * of draws taken from the 1999 generator. */
         {
             int ghost_count = (g->game_mode > 0) ? 10 : 20;  /* MAIN.ASM:6779-6783 */
-            int start = g->ball_count;
-            int end = start + ghost_count;
-            int _capped = 0;
-            if (end > BALL_MAX + 1) { end = BALL_MAX + 1; _capped = 1; }
-            SPAWN_LOG(g, "ghost: requested=%d owner=%d start=%d end=%d capped=%d",
-                      ghost_count, collected_by, start, end, _capped);
-            for (i = start; i < end; i++) {
-                int vx, vy;
-                ball_init(&g->balls[i],
-                          owner_paddle->x + owner_paddle->w / 2 - BALL_W / 2,
-                          owner_paddle->y - BALL_H);
-                compute_launch_velocity(g, g->level_num, &vx, &vy);
-                /* Spread ghost balls in different directions */
-                int spread = (i - start) - ghost_count / 2;
-                vx += spread;
-                ball_set_velocity(&g->balls[i], vx, vy);
-                ball_clamp_speed(&g->balls[i]);
-                g->balls[i].is_magnetic = 0;
-                g->balls[i].is_ghost = 1;  /* mark as ghost/bubble */
-                g->balls[i].owner = collected_by;  /* MAIN.ASM:sprite_player */
+            spawn_extra_balls(g, ghost_count, collected_by);
+
+            /* set_ghost — every ball of the collector */
+            for (i = 0; i < g->ball_count; i++) {
+                if (!g->balls[i].active) continue;
+                if (g->balls[i].owner != collected_by) continue;
+                g->balls[i].is_ghost = 1;
             }
-            g->ball_count = end;
-            /* MAIN.ASM:3358  unghost_one_ball — first active ball stays normal */
-            /* balls[0] is the original ball and is NOT marked as ghost */
+            /* unghost_one_ball — first ACTIVE ball of that player, then stop */
+            for (i = 0; i < g->ball_count; i++) {
+                if (!g->balls[i].active) continue;
+                if (g->balls[i].owner != collected_by) continue;
+                g->balls[i].is_ghost = 0;
+                break;
+            }
         }
         g->ghost_active = 1;
-        /* MAIN.ASM:6788  mov current_option,Off — ghost is INSTANT, not timed.
-         * The ghost balls are spawned and the powerup effect ends immediately.
-         * Ghost balls self-destruct on contact; ghost_active stays on until
-         * all ghost balls are gone or player loses a life. */
+        /* MAIN.ASM:6788  mov current_option,Off — ghost is INSTANT, not timed. */
         break;
 
     /* ------------------------------------------------------------------
@@ -1166,21 +1277,13 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * MAIN.ASM:detect_large_cursor / detect_small_cursor
      * ------------------------------------------------------------------ */
     case POWERUP_LARGE_SHIP:
-        /* MAIN.ASM:6500 option_large_ship_p — per-player. */
-        paddle_set_size(owner_paddle, PADDLE_SIZE_LARGE);
-        owner_paddle->size_timer = (duration > 0) ? duration : DELAI_OPTION;
-        if (g->audio) audio_play(g->audio, SFX_LARGE_PADDLE);
-        break;
     case POWERUP_SMALL_SHIP:
-        /* MAIN.ASM:6491 option_small_ship_p — per-player. */
-        paddle_set_size(owner_paddle, PADDLE_SIZE_SMALL);
-        owner_paddle->size_timer = (duration > 0) ? duration : DELAI_OPTION;
-        if (g->audio) audio_play(g->audio, SFX_SMALL_PADDLE);
-        break;
     case POWERUP_REVERSE:
-        /* MAIN.ASM:6562 option_reverse_p — per-player. */
-        owner_paddle->reversed = 1;
-        owner_paddle->reverse_timer = (duration > 0) ? duration : DELAI_OPTION;
+        /* Nothing to do here either: option_large_ship_p, option_small_ship_p
+         * and option_reverse_p are bare `ret` (MAIN.ASM:6703, 6710, 6717).
+         * The size swap, its SFX and the reverse binding are all derived from
+         * the slot by detect_large/small_cursor_* and MOUSE.ASM:33 —
+         * sync_paddle_from_option does that job. */
         break;
     case POWERUP_NIGHT:
         /* MAIN.ASM:6641-6663 option_night_p.
@@ -1230,7 +1333,6 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
                 g->balls[tj].telepod_timer = DELAI_TELEPOD;
                 teleported = 1;
             }
-            if (teleported && g->audio) audio_play(g->audio, SFX_TELEPOD);
             /* MAIN.ASM:2420-2460 Init_Cursor_Telepod — the collecting
              * paddle plays the vaisseau_telepod_* 10-frame animation
              * while the balls are invisible mid-jump. */
@@ -1245,7 +1347,7 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * ------------------------------------------------------------------ */
     case POWERUP_DEL_MONSTER:
         /* Iter 2 fix #6+#7: monster SFX is iff_del_monster → MONSTOFF.wav
-         * (= SFX_POWERUP_LOST). MAIN.ASM:3151-3168 loop plays SFX per kill. */
+         * (= SFX_DEL_MONSTER). MAIN.ASM:3151-3168 loop plays SFX per kill. */
         monster_destroy_all(g->monsters, g->audio);
         break;
     case POWERUP_ADD_MONSTER:
@@ -1276,52 +1378,47 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         break;
     }
 
-    /* F3-iter3-01: MAIN.ASM:5687-5691 detect_prise_option sets
-     *   mov current_option,eax              (the picked option_*_o adrs)
-     *   mov [ebx.player_current_option],eax
-     *   mov current_option_count,DELAI_OPTION
-     * UNCONDITIONALLY for every collected powerup (after push/pop old_option
-     * at MAIN.ASM:5675-5676). The HUD panel_option then draws the current
-     * option icon, and detect_current_option_end fires iff_option_off when
-     * the timer hits 0. Exception: MAGNETIC handler (MAIN.ASM:6745-6750
-     * push/pop old_option) restores the previous current_option across the
-     * call, so the magnetic pickup does NOT occupy the current_option slot.
-     * All other handlers either leave it set (timed) or write Off themselves
-     * (instant — MAIN.ASM:6352/6367/6382/...), but the initial write here
-     * drives the HUD update that iter 2 was missing for instant powerups. */
-    /* NIGHT case (line 1041) intentionally sets current_option=POWERUP_COUNT
-     * to mirror MAIN.ASM:6659 (option_night_p writes current_option=Off).
-     * If we override it back to POWERUP_NIGHT here, detect_init_palette
-     * (tick_option_timer line 1184) immediately clears night_active on the
-     * next frame because it sees current_option != POWERUP_COUNT.
-     * Excluding NIGHT here preserves the ASM-faithful Off state. */
-    if (type != POWERUP_MAGNETIC && type != POWERUP_NIGHT) {
-        g->current_option = type;
-        g->current_option_count = DELAI_OPTION;
-    }
-
-    /* Iter3-A: five options leave the current_option slot within the same
-     * frame that collected them, so they must NOT sit in the slot here:
-     *   - @@reset_current_option (MAIN.ASM:2884-2899) writes current_option=Off
-     *     at the end of the Refresh_Ball pass for option_iron_ball_o,
-     *     option_telepod_o, option_fast_ball_o and option_slow_ball_o;
-     *   - option_ghost_p ends with `mov current_option,Off` (MAIN.ASM:6786-6788).
-     * Their one-shot effect was applied in the switch above. The shared count
-     * stays armed (detect_prise_option, MAIN.ASM:5691) — its expiry
-     * @@current_option_off (MAIN.ASM:6321-6327) only plays the off sound,
-     * calls reset_magnetic and restores the palette: it neither restores
-     * sprite_rebond (iron is permanent per ball, MAIN.ASM:2844-2846) nor
-     * removes ghost balls (they only pop on paddle contact, MAIN.ASM:4207-4209). */
-    if (type == POWERUP_IRON_BALL || type == POWERUP_TELEPOD ||
-        type == POWERUP_FAST_BALL || type == POWERUP_SLOW_BALL ||
-        type == POWERUP_GHOST) {
-        /* detect_init_palette (MAIN.ASM:6667-6677) still sees the transient
-         * current_option on the NEXT frame for the four Refresh_Ball options
-         * (pickup happens after the palette check in the ASM loop) and ends
-         * night early. Ghost's handler resets to Off in the same call, before
-         * detect_init_palette can see it — night survives a ghost pickup. */
-        if (type != POWERUP_GHOST) g->night_active = 0;
-        g->current_option = POWERUP_COUNT;
+    /* MAIN.ASM — which options actually STAY in a slot after the frame that
+     * collected them, and which wipe both players:
+     *   KEPT (re-read every frame): shoot, mini_shoot, small_ship, large_ship,
+     *     reverse (MAIN.ASM:1863-1866, 2547, 2593, MOUSE.ASM:33) and collision
+     *     (MAIN.ASM:2274-2316).
+     *   WIPED — `mov current_option,Off / mov player_1…,Off / mov player_2…,Off`:
+     *     3/6/9/20 balls (6352, 6367, 6382, 6397), death (6417), new_life
+     *     (6441), night (6659), del_monster (6735), add_monster (6769), ghost
+     *     (6786), bonus (6805), malus (6823), next_level (4145), and iron /
+     *     telepod / fast / slow via @@reset_current_option (2895-2898).
+     *   MAGNETIC restores old_option into all three (MAIN.ASM:6745-6750). */
+    switch (type) {
+    case POWERUP_SHOOT: case POWERUP_MINI_SHOOT:
+    case POWERUP_SMALL_SHIP: case POWERUP_LARGE_SHIP:
+    case POWERUP_REVERSE: case POWERUP_COLLISION:
+        break;                                   /* stays in the slot */
+    case POWERUP_MAGNETIC:
+        /* MAIN.ASM:6745-6750  push old_option x3 / pop into the three slots.
+         * The shared count is NOT restored — 5691 already re-armed it. */
+        g->current_option   = old_option;
+        g->player_option[0] = old_option;
+        g->player_option[1] = old_option;
+        break;
+    default:
+        /* Night is cleared by exactly FOUR options, and NIGHT is not one of
+         * them. @@reset_current_option (MAIN.ASM:2895-2898) writes
+         * current_option = Off at the END of Refresh_Ball for iron / telepod /
+         * fast / slow, so detect_init_palette (MAIN.ASM:6667-6677, called at
+         * MAIN.ASM:1078) has already seen current_option set that frame and
+         * killed the night. Every other option either never occupies the slot
+         * or clears it inside its own handler, before the palette check.
+         * A previous revision applied this to the whole default branch, which
+         * swallowed POWERUP_NIGHT itself: its case set night_active = 1 and
+         * this line wiped it in the same call, leaving the powerup silent and
+         * inert. */
+        if (type == POWERUP_IRON_BALL || type == POWERUP_TELEPOD ||
+            type == POWERUP_FAST_BALL || type == POWERUP_SLOW_BALL) {
+            g->night_active = 0;
+        }
+        clear_all_options(g);
+        break;
     }
 
     (void)duration;  /* suppress warning if unused by a path */
@@ -1334,42 +1431,17 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
  *   when == 0 → clear the current_option effect.
  * -------------------------------------------------------------------------- */
 static void tick_option_timer(Game *g) {
-    /* Per-paddle laser countdowns — independent from global current_option.
-     * MAIN.ASM:1883-1901  dec count_tir_big_1 / count_tir_big_2 etc.
-     * When a paddle's laser expires, only that paddle loses its gun. */
-    if (g->paddle.laser_timer > 0) {
-        g->paddle.laser_timer--;
-        if (g->paddle.laser_timer == 0) {
-            g->paddle.has_gun = 0;
-            g->paddle.mini_laser = 0;
-        }
-    }
-    if (g->paddle_2.laser_timer > 0) {
-        g->paddle_2.laser_timer--;
-        if (g->paddle_2.laser_timer == 0) {
-            g->paddle_2.has_gun = 0;
-            g->paddle_2.mini_laser = 0;
-        }
-    }
+    /* detect_current_option_end opens with
+     *     cmp game_mode,PLAYING / je @@ok / ret        (MAIN.ASM:6298-6300)
+     * so the shared option timer is FROZEN outside play — it does not tick
+     * down during the "ready ?" screen. */
+    if (g->state != STATE_PLAYING) return;
 
-    /* Per-paddle size/reverse countdowns — MAIN.ASM:6491,6500,6562 per-player. */
-    if (g->paddle.size_timer > 0) {
-        g->paddle.size_timer--;
-        if (g->paddle.size_timer == 0) paddle_set_size(&g->paddle, PADDLE_SIZE_NORMAL);
-    }
-    if (g->paddle_2.size_timer > 0) {
-        g->paddle_2.size_timer--;
-        if (g->paddle_2.size_timer == 0) paddle_set_size(&g->paddle_2, PADDLE_SIZE_NORMAL);
-    }
-    if (g->paddle.reverse_timer > 0) {
-        g->paddle.reverse_timer--;
-        if (g->paddle.reverse_timer == 0) g->paddle.reversed = 0;
-    }
-    if (g->paddle_2.reverse_timer > 0) {
-        g->paddle_2.reverse_timer--;
-        if (g->paddle_2.reverse_timer == 0) g->paddle_2.reversed = 0;
-    }
-
+    /* No per-paddle countdowns exist. The ASM has ONE shared timer
+     * (current_option_count, MAIN.ASM:5691) and derives every carried effect
+     * from player_current_option each frame; count_tir_big_1 / count_tir_left_1
+     * (MAIN.ASM:6525, 6570) are muzzle-flash animation counters decremented at
+     * MAIN.ASM:1897-1903, not powerup durations. */
     /* MAIN.ASM:6667-6677 detect_init_palette — if night is on AND another
      * timed powerup is active, clear night (palette restored on next draw
      * since night_active controls the overlay in draw.c). Ported inline
@@ -1470,9 +1542,35 @@ static void handle_life_lost(Game *g) {
         paddle_set_size(lp, PADDLE_SIZE_NORMAL);
     }
 
-    /* Clear all falling (uncollected) powerups */
+    /* Losing a life runs the FULL board reset, not just a powerup sweep.
+     * test_game_over returns `stc` on the survive branch (MAIN.ASM:4712), and
+     * main does `call detect_game_over_player_1 / jc start_game`
+     * (MAIN.ASM:1088-1091). start_game (MAIN.ASM:1036-1045) then runs
+     *     call init_sprites      ; every non-Panel sprite → sprite_status,Off
+     *     call reset_magnetic
+     *     call reset_ghost
+     * and falls through to rebuild_all → init_options / init_monster.
+     * Init_Sprites (MAIN.ASM:1487) is the wide one: it wipes monsters,
+     * in-flight shots and falling options alike. The port only cleared the
+     * options, so monsters kept crawling and lasers kept flying through the
+     * ship explosion and the "ready ?" screen. */
     for (i = 0; i < g->powerup_count; i++) g->powerups[i].active = 0;
     g->powerup_count = 0;
+
+    memset(g->monsters, 0, sizeof(g->monsters));   /* MAIN.ASM:1487 + init_monster */
+    g->monster_spawn_counter = 0;                  /* MAIN.ASM:2927 init_Monster   */
+    memset(g->projectiles, 0, sizeof(g->projectiles));
+    g->proj_count = 0;
+
+    /* MAIN.ASM:1042-1043  reset_magnetic / reset_ghost. An earlier revision
+     * claimed the magnet SURVIVES a life lost, citing test_game_over and
+     * _Init_Cursor — both accurate, but both miss this call site. */
+    g->magnetic_flag = 0;
+    g->ghost_active  = 0;
+    for (i = 0; i < g->ball_count; i++) {
+        g->balls[i].is_magnetic = 0;
+        g->balls[i].is_ghost    = 0;
+    }
 
     /* MAIN.ASM:4674-4675  dec player_nbs_ball — per-player dispatch.
      * MAIN.ASM:4595 detect_game_over_player_1 per-player path. */
@@ -1496,10 +1594,22 @@ static void handle_life_lost(Game *g) {
         * `mov game_mode,GAME_OVER` with NO dual_flag test — the survivor
         * (lives >= 0) is the winner (main.c derives it from lives). */
 
+    /* MAIN.ASM:4792-4796  destroy_vaisseau opens with
+     *     play_sound iff_explosion
+     *     play_sound iff_game_over
+     * and test_game_over calls it from BOTH branches — MAIN.ASM:4685 (the
+     * GAME_OVER path) and MAIN.ASM:4703 (the @@cont / READY_TO_PLAY_AGAIN
+     * path). The ship blows up on every life lost, not only on the last one.
+     * Emitting the pair here covers both branches in ASM order: the @@cont
+     * path then adds iff_restart below (MAIN.ASM:4707). */
+    if (g->audio) {
+        audio_play(g->audio, SFX_EXPLOSION);
+        audio_play(g->audio, SFX_GAME_OVER);
+    }
+
     if (game_over) {
         /* MAIN.ASM:4678  mov game_mode,GAME_OVER */
         g->state = STATE_GAME_OVER;
-        if (g->audio) audio_play(g->audio, SFX_GAME_OVER);
 #if defined(BRICKBLASTER_MOBILE)
         {
             static const int death_pattern[] = {0, 100, 50, 200, 50, 100};
@@ -1571,10 +1681,14 @@ static void tick_speed_counter(Game *g) {
         if (!g->balls[i].active) continue;
         /* F1-C lazy seed: ball_init sets speed_counter=0 (doesn't know
          * speed_level). First tick where we need a value, seed it.
-         * MAIN.ASM:1474-1475 spawns with speed_delai; we use the per-level
-         * speed_level*3 to match the ASM 18fps→60fps scaling. */
+         * init_ball seeds sprite_speed_counter with the RAW speed_delai, not
+         * the per-level speed_level:
+         *     mov eax,speed_delai
+         *     mov [edx.sprite_speed_counter],eax     (MAIN.ASM:2797-2798)
+         * so an extra ball from a multi-ball waits the full 1500 frames before
+         * its first speed-up, whatever the level. */
         if (g->balls[i].speed_counter <= 0 && g->balls[i].vy >= 0) {
-            g->balls[i].speed_counter = g->speed_level * 3;
+            g->balls[i].speed_counter = speed_delai_of(g);
         }
         int apply = 0;
         /* MAIN.ASM:3390-3394 per-ball decrement gate. */
@@ -1583,7 +1697,7 @@ static void tick_speed_counter(Game *g) {
              * first decrement, matching the ASM which spawns with
              * sprite_speed_counter = speed_delai (MAIN.ASM:1475). */
             if (g->balls[i].speed_counter <= 0) {
-                g->balls[i].speed_counter = g->speed_level * 3;
+                g->balls[i].speed_counter = g->speed_level;
             }
             g->balls[i].speed_counter--;
             if (g->balls[i].speed_counter <= 0) apply = 1;
@@ -1598,8 +1712,8 @@ static void tick_speed_counter(Game *g) {
          *   mov eax,speed_level
          *   mov [edx.sprite_speed_counter],eax
          *   call inc_speed_x / inc_speed_y
-         * Multiply by 3 to compensate 60fps vs ASM 18fps. */
-        g->balls[i].speed_counter = g->speed_level * 3;
+         * Reloaded 1:1 — see the frame-rate note in game.h. */
+        g->balls[i].speed_counter = g->speed_level;
         {
             /* inc_speed_x: MAIN.ASM:3427-3441 clamp at speed_max_x+angle */
             int lim_x = SPEED_MAX_X + g->balls[i].angle;
@@ -1621,7 +1735,7 @@ static void tick_speed_counter(Game *g) {
     /* Keep global mirror — many HUD/debug paths still read g->speed_counter.
      * Mirror the minimum remaining time across active balls so the readout
      * shows the next scheduled speedup. */
-    int min_ctr = g->speed_level * 3;
+    int min_ctr = g->speed_level;
     for (i = 0; i < g->ball_count; i++) {
         if (!g->balls[i].active) continue;
         if (g->balls[i].speed_counter > 0 && g->balls[i].speed_counter < min_ctr)
@@ -1684,13 +1798,17 @@ static int projectile_hit_brick(Game *g, Projectile *p)
     /* Apply damage — MAIN.ASM:3996  dec B [esi+ebx] (damage = 1) */
     destroyed = brick_hit(b, 1);
 
-    /* Sound — MAIN.ASM:4032 / MAIN.ASM:4055 */
+    /* Sound — three cases, not two:
+     *   MAIN.ASM:4055  iff_incassable  → indestructible brick        (WALL)
+     *   MAIN.ASM:4032  iff_normale     → brick DESTROYED             (BOUNCE)
+     *   MAIN.ASM:4108  iff_multi       → brick damaged, still standing
+     * The last one is reached by `cmp B [esi+ebx],absente / jne @@redraw_brique`
+     * (MAIN.ASM:4004-4005): "multi" is a multi-HIT brick, not multi-ball. Its
+     * slot is aliased onto iff_incassable (FILE.ASM:744-746), so it is WALL. */
     if (g->audio) {
-        if (b->type == BRICK_INDESTRUCTIBLE) {
-            audio_play(g->audio, SFX_WALL_HIT);
-        } else {
-            audio_play(g->audio, SFX_BRICK_HIT);
-        }
+        if (b->type == BRICK_INDESTRUCTIBLE) audio_play(g->audio, SFX_WALL_HIT);
+        else if (destroyed)                  audio_play(g->audio, SFX_BRICK_HIT);
+        else                                 audio_play(g->audio, SFX_WALL_HIT);
     }
 #if defined(BRICKBLASTER_MOBILE)
     platform_vibrate(10);
@@ -1704,7 +1822,7 @@ static int projectile_hit_brick(Game *g, Projectile *p)
     /* P0-ASM-1: projectile brick destruction uses inc_score helper
      * (difficulty + night scaling + bonus-life trigger + +80 bonus).
      * MAIN.ASM:4024-4026 call inc_score ecx=1. */
-    if (!g->demo_active && destroyed) {
+    if (destroyed) {
         inc_score(g, p->owner, 1);
     }
     (void)score_delta;  /* kept for compat; unused after helper */
@@ -1737,13 +1855,17 @@ static int projectile_hit_brick(Game *g, Projectile *p)
         }
     }
 
-    /* Big shoot (POWERUP_SHOOT): penetrates all breakable bricks, travels to top.
-     * MAIN.ASM refresh_shoot — big projectile is a laser beam through the brick column.
-     * Only stops at BRICK_INDESTRUCTIBLE walls.
-     * Mini shoot (POWERUP_MINI_SHOOT): consumed on first solid brick hit, but
-     * transparent bricks are pass-through (matches ball behaviour and the ASM
-     * collision rule for transparent cells). */
-    if (p->is_big && b->type != BRICK_INDESTRUCTIBLE) {
+    /* Big shoot pierces EVERYTHING, indestructible bricks included; it only
+     * ends at the top wall. It is spawned with `mov [edx.sprite_rebond],Off`
+     * (MAIN.ASM:1946), detect_colision_brique refuses to set new_direction for
+     * a rebond-Off sprite (`cmp [edx.sprite_rebond],Off / je @@cont`,
+     * MAIN.ASM:3863-3864), and change_direction returns at `cmp
+     * new_direction,Off / je @@end` (MAIN.ASM:3908-3909) — so it never reaches
+     * @@shoot_off, the only place a shot is destroyed. The port used to
+     * consume it on an indestructible brick.
+     * Mini shoot keeps rebond On, so it does set new_direction and dies at
+     * @@shoot_off; transparent cells are pass-through as for the ball. */
+    if (p->is_big) {
         return 0;   /* projectile survives, keeps moving up */
     }
     if (!p->is_big && b->type == BRICK_TRANSPARENT) {
@@ -1836,7 +1958,7 @@ static int teleport_corner_blocked(Game *g, int x, int y) {
     idx = row * BRICK_COLS + col;
     if (idx < 0 || idx >= BRICK_COUNT) return 0;
     if (!g->bricks[idx].active) return 0;
-    /* MAIN.ASM:1722  cmp al,incassable; je @@bad — only exact 0x08 fails. */
+    /* MAIN.ASM:1719  cmp al,incassable; je @@bad — only exact 0x08 fails. */
     return (g->bricks[idx].type == BRICK_INDESTRUCTIBLE) ? 1 : 0;
 }
 
@@ -1854,9 +1976,9 @@ static void teleport_ball_random(Game *g, Ball *b) {
          * (0, 0), (size_y, 0), (0, size_x), (size_y, size_x) —
          * the four sprite corners. MAIN.ASM:1544-1560. */
         if (teleport_corner_blocked(g, rx,           ry          )) continue;
-        if (teleport_corner_blocked(g, rx + BALL_W-1, ry          )) continue;
-        if (teleport_corner_blocked(g, rx,           ry + BALL_H-1)) continue;
-        if (teleport_corner_blocked(g, rx + BALL_W-1, ry + BALL_H-1)) continue;
+        if (teleport_corner_blocked(g, rx + BALL_W  , ry          )) continue;
+        if (teleport_corner_blocked(g, rx,           ry + BALL_H  )) continue;
+        if (teleport_corner_blocked(g, rx + BALL_W  , ry + BALL_H  )) continue;
         b->x = rx;
         b->y = ry;
         return;
@@ -1940,6 +2062,13 @@ void game_update(Game *g, const FrameInput *input) {
      * STEP 0: Active powerup timer tick — FIRST thing every frame
      * MAIN.ASM:1068  call detect_current_option_end  (before refresh_mouse)
      * ======================================================================= */
+    /* MAIN.ASM:1071-1076  detect_large/small_cursor_player_1/2 and
+     * detect_shoot_player_1/2 run every frame, before the timer tick
+     * (MAIN.ASM:1068 detect_current_option_end comes first in the listing but
+     * the slots it clears are re-read on the following frame either way). */
+    sync_paddle_from_option(g, 0);
+    if (g->game_mode > 0) sync_paddle_from_option(g, 1);
+
     tick_option_timer(g);
 
     /* Powerup spawn cooldown: increment every frame, not per brick destroy.
@@ -2037,10 +2166,18 @@ void game_update(Game *g, const FrameInput *input) {
         g->demo_timer = DELAI_DEMO;   /* any input resets demo timer */
     }
 
-    /* Iter 2 fix #1: P2 ball must also launch in coop/duel. MAIN.ASM:5280-5349
-     * detect_start_game fires BOTH ball_1 and ball_2 via read_click_player_1
-     * and read_click_player_2 independently. Each ball launches on its owner's
-     * fire input.  In solo mode only P1 exists; any fire counts. */
+    /* ONE click launches BOTH balls. detect_start_game has a single gate —
+     *     cmp computer_flag,On / je @@pass
+     *     cmp demo_flag,On / je @@click
+     *     @@pass: call read_click / jz @@end
+     * (MAIN.ASM:5281-5288) — and read_click (MOUSE.ASM:437-465) aggregates
+     * mouse buttons, CTRL and joystick buttons, so it does not care which
+     * player pressed. It then writes ball_2's velocity (MAIN.ASM:5309-5327)
+     * AND ball_1's (5330-5343) in the same pass. There are per-player
+     * read_click_player_N routines, but they serve the magnetic release
+     * inside move_ball (MAIN.ASM:3269-3295), not the serve. An earlier
+     * revision gated each ball on its owner's fire, so in coop the second
+     * ball sat glued until that player pressed their own key. */
     {
         int p1_fire = fire_pressed;
         int p2_fire = (g->game_mode > 0) ? input->p2_fire : 0;
@@ -2048,25 +2185,48 @@ void game_update(Game *g, const FrameInput *input) {
             && (p1_fire || p2_fire)) {
             /* Launch ball(s): MAIN.ASM:5290  mov game_mode,PLAYING */
             g->state = STATE_PLAYING;
+            int launch_vx, launch_vy;
+            compute_launch_velocity(g, g->level_num, &launch_vx, &launch_vy);
             for (i = 0; i < g->ball_count; i++) {
                 if (!g->balls[i].active) continue;
                 /* Each ball launches on its owner's fire press. In solo the
                  * only ball is owner==0 and p1_fire governs it. */
                 int owner = g->balls[i].owner;
-                int owner_fire = (owner == 1) ? p2_fire : p1_fire;
-                if (!owner_fire) continue;
-                {
-                    int vx, vy;
-                    compute_launch_velocity(g, g->level_num, &vx, &vy);
-                    /* Iter3-C: MAIN.ASM:5311-5325 — ball_2 launches MIRRORED:
-                     * `neg eax / mov ball_2.sprite_sens_x,eax` then
-                     * `sub ball_2.sprite_sens_x,eax` for the level boost →
-                     * vx is negative (leftward); vy is the same as ball_1. */
-                    if (owner == 1) vx = -vx;
-                    ball_set_velocity(&g->balls[i], vx, vy);
-                    g->balls[i].is_magnetic = 0;
-                }
+                /* Iter3-C: MAIN.ASM:5311-5325 — ball_2 launches MIRRORED:
+                 * `neg eax / mov ball_2.sprite_sens_x,eax` then
+                 * `sub ball_2.sprite_sens_x,eax` for the level boost →
+                 * vx is negative (leftward); vy is the same as ball_1. */
+                ball_set_velocity(&g->balls[i],
+                                  (owner == 1) ? -launch_vx : launch_vx,
+                                  launch_vy);
+                g->balls[i].is_magnetic = 0;
             }
+            /* MAIN.ASM:5345-5348 (tail of the launch routine, runs on every
+             * launch regardless of player count):
+             *     mov eax,ball_2.sprite_sens_x
+             *     neg eax
+             *     shl eax,1
+             *     mov speed_counter,eax
+             * ball_2.sprite_sens_x is -(speed_start + level boost), so
+             * speed_counter ends up 2x the ball's launch speed — 4/6/8 at
+             * level 1 for easy/medium/hard, +2 per speed step. speed_counter
+             * is read ONLY by Refresh_Keyboard to step cursor_2
+             * (MOUSE.ASM:50-51 and 71-72); MOUSE.ASM:77 `speed_counter dd 6`
+             * is just its loader initialiser, not the in-game value.
+             * Two deliberate deviations, both port-level:
+             *  - The ASM only writes ball_2's velocity when nbs_player == 2,
+             *    so in solo it squares a stale value into speed_counter. We
+             *    always derive from the current launch speed.
+             *  - We apply it to BOTH paddles. cursor_1 was mouse-only in 1999
+             *    (Refresh_Mouse sets a position, never a step), so the ASM has
+             *    no P1 keyboard speed at all; the port invented one and seeded
+             *    it with PADDLE_SPEED = 6 — which is just MOUSE.ASM:77's
+             *    initialiser for P2. Deriving both from the same rule keeps
+             *    the two keyboard players symmetric and holds the paddle at a
+             *    constant 2:1 against the ball, which is what the ASM formula
+             *    expresses. Mouse control is unaffected: it sets x directly. */
+            g->paddle.speed   = 2 * launch_vx;
+            g->paddle_2.speed = 2 * launch_vx;
         }
     }
 
@@ -2118,7 +2278,22 @@ void game_update(Game *g, const FrameInput *input) {
     if (g->magnetic_flag && g->state == STATE_PLAYING) {
         for (i = 0; i < g->ball_count; i++) {
             if (g->balls[i].active && g->balls[i].is_magnetic) {
-                int owner_fire = (g->balls[i].owner == 1) ? input->p2_fire : fire_pressed;
+                /* Attract mode releases on contact, with no click at all.
+                 * MAIN.ASM:3269-3272 (player_one) and 3288-3290 (player_two),
+                 * inside move_ball's magnetic branch:
+                 *     cmp demo_flag,On
+                 *     je  @@shoot_1        ; skip read_click entirely
+                 * Without this the demo deadlocks: it produces no real fire
+                 * input, and demo_update_paddle() skips magnetic balls when
+                 * picking a target (demo.c), so the paddle would freeze with
+                 * the ball glued to it for the rest of the attract loop.
+                 * Not modelled: MAIN.ASM:3269 tests `computer_flag` BEFORE
+                 * demo_flag on the P1 path, so a computer-driven P1 still
+                 * reads the click. The port has no computer_flag for P1
+                 * (only control_p2), so there is nothing to gate on yet. */
+                int owner_fire = g->demo_active ? 1
+                               : ((g->balls[i].owner == 1) ? input->p2_fire
+                                                           : fire_pressed);
                 if (!owner_fire) continue;
                 /* MAIN.ASM:3238-3245 clear magnetic_flag bit for this player */
                 g->magnetic_flag &= ~((g->balls[i].owner == 1) ? PLAYER_TWO : PLAYER_ONE);
@@ -2171,16 +2346,35 @@ void game_update(Game *g, const FrameInput *input) {
          * ONE projectile, returns. Left/right cannon sprites are muzzle flash
          * visuals only — not separate projectiles.
          * Mini-shoot alternates left/right cannon position each fire. */
-        if (fire_pressed && g->paddle.gun_cooldown == 0
+        /* Attract mode fires by itself. Detect_Shoot_player_1 branches on
+         *     cmp computer_flag,On / je @@player
+         *     cmp demo_flag,On / je @@auto_shoot
+         * and @@auto_shoot fires whenever `delai_auto_shoot_player_1 > 10`,
+         * a counter bumped once per frame by wait_synchro (MAIN.ASM:1907-1920,
+         * DRAW.ASM:154-156). Without it, a SHOOT the demo picks up is never
+         * used. gun_cooldown already provides the rate limit. */
+        int shoot_now = fire_pressed || (g->demo_active && (g->frame % 11) == 0);
+        if (shoot_now && g->paddle.gun_cooldown == 0
             && g->proj_count < MAX_PROJECTILES) {
             Projectile *p = &g->projectiles[g->proj_count];
 
+            /* Y is set ONCE, before the big/mini split:
+             *     mov eax,cursor_1.sprite_pos_y
+             *     sub eax,vaisseau_tir_size_y        ; 18, Blaster.inc:239
+             *     mov [edx.sprite_pos_y],eax         (MAIN.ASM:1936-1938)
+             * so both shot kinds start 18 px above the paddle top, not the
+             * 7/8 px the port used. */
+            p->y = g->paddle.y - VAISSEAU_TIR_SIZE_Y;
             if (is_big) {
-                /* Big shoot: centre projectile.
-                 * Blaster.inc:246-247  vaisseau_decal_x_b / _y_b
-                 * MAIN.ASM:1949-1954 */
-                p->x = g->paddle.x + VAISSEAU_DECAL_X_B;
-                p->y = g->paddle.y + VAISSEAU_DECAL_Y_B;
+                /* Centred on the CURRENT paddle width, using the shot's own
+                 * width — MAIN.ASM:1949-1954:
+                 *     mov eax,cursor_1.sprite_pos_x
+                 *     mov ebx,cursor_1.sprite_size_x
+                 *     sub ebx,[edx.sprite_size_x]    ; shoot_size_x = 8
+                 *     shr ebx,1 / add eax,ebx
+                 * The port used the fixed vaisseau_decal_x_b = 31, which is
+                 * only correct for the normal paddle. */
+                p->x = g->paddle.x + (g->paddle.w - SHOOT_W) / 2;
                 p->vy = -VAISSEAU_TIR_BIG_SPEED;
                 p->active = 1;
                 p->is_big = 1;
@@ -2189,11 +2383,10 @@ void game_update(Game *g, const FrameInput *input) {
                  * MAIN.ASM:1984  xor player_1.player_left_or_right,On */
                 g->paddle.gun_side ^= 1;  /* toggle L/R */
                 if (g->paddle.gun_side) {
-                    p->x = g->paddle.x + VAISSEAU_DECAL_X_R;
-                    p->y = g->paddle.y + VAISSEAU_DECAL_Y_R;
+                    /* MAIN.ASM:1987  add eax,vaisseau_decal_x_r+6 */
+                    p->x = g->paddle.x + VAISSEAU_DECAL_X_R + 6;
                 } else {
                     p->x = g->paddle.x + VAISSEAU_DECAL_X_L;
-                    p->y = g->paddle.y + VAISSEAU_DECAL_Y_L;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;
@@ -2215,15 +2408,12 @@ void game_update(Game *g, const FrameInput *input) {
              * Mini-shoot (MAIN.ASM:1970-2027) does NOT clear — it stays
              * timed for DELAI_OPTION frames. */
             if (is_big) {
-                g->paddle.has_gun      = 0;
-                g->paddle.laser_timer  = 0;
-                g->paddle.mini_laser   = 0;
-                /* Also clear the global current_option slot (set by Fix 3
-                 * at collection time) since ASM:1947 clears it too. */
-                if (g->current_option == POWERUP_SHOOT) {
-                    g->current_option       = POWERUP_COUNT;
-                    g->current_option_count = 0;
-                }
+                /* MAIN.ASM:1947-1948 — firing the big shoot consumes it:
+                 *   mov current_option,off
+                 *   mov player_1.player_current_option,Off
+                 * has_gun then falls out of sync_paddle_from_option by itself. */
+                g->current_option   = POWERUP_COUNT;
+                g->player_option[0] = POWERUP_COUNT;
             }
         }
     }
@@ -2239,9 +2429,10 @@ void game_update(Game *g, const FrameInput *input) {
             && g->proj_count < MAX_PROJECTILES) {
             Projectile *p = &g->projectiles[g->proj_count];
 
+            /* Same geometry as P1 — MAIN.ASM:2145-2200 mirrors 1932-1992. */
+            p->y = g->paddle_2.y - VAISSEAU_TIR_SIZE_Y;
             if (is_big) {
-                p->x = g->paddle_2.x + VAISSEAU_DECAL_X_B;
-                p->y = g->paddle_2.y + VAISSEAU_DECAL_Y_B;
+                p->x = g->paddle_2.x + (g->paddle_2.w - SHOOT_W) / 2;
                 p->vy = -VAISSEAU_TIR_BIG_SPEED;
                 p->active = 1;
                 p->is_big = 1;
@@ -2249,11 +2440,9 @@ void game_update(Game *g, const FrameInput *input) {
                 /* MAIN.ASM:2193  xor player_2.player_left_or_right,On */
                 g->paddle_2.gun_side ^= 1;
                 if (g->paddle_2.gun_side) {
-                    p->x = g->paddle_2.x + VAISSEAU_DECAL_X_R;
-                    p->y = g->paddle_2.y + VAISSEAU_DECAL_Y_R;
+                    p->x = g->paddle_2.x + VAISSEAU_DECAL_X_R + 6;
                 } else {
                     p->x = g->paddle_2.x + VAISSEAU_DECAL_X_L;
-                    p->y = g->paddle_2.y + VAISSEAU_DECAL_Y_L;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;
@@ -2268,13 +2457,8 @@ void game_update(Game *g, const FrameInput *input) {
              * path mirrors MAIN.ASM:1947-1948 — big shoot clears
              * current_option + player_2.player_current_option after firing. */
             if (is_big) {
-                g->paddle_2.has_gun      = 0;
-                g->paddle_2.laser_timer  = 0;
-                g->paddle_2.mini_laser   = 0;
-                if (g->current_option == POWERUP_SHOOT) {
-                    g->current_option       = POWERUP_COUNT;
-                    g->current_option_count = 0;
-                }
+                g->current_option   = POWERUP_COUNT;   /* MAIN.ASM:2156 */
+                g->player_option[1] = POWERUP_COUNT;   /* MAIN.ASM:2157 */
             }
         }
     }
@@ -2292,22 +2476,18 @@ void game_update(Game *g, const FrameInput *input) {
     /* =======================================================================
      * STEP 3: Ball physics — for each active ball
      * MAIN.ASM:1082  call refresh_ball
-     * Order per ball: collision_walls → collision_paddle → collision_bricks → ball_move
+     * Order per ball, matching Refresh_Ball (MAIN.ASM:2864-2871):
+     *   detect_colision_cursor_player_1/2 → detect_colision_wall →
+     *   detect_colision_brique → detect_colision_monster → move_ball
+     * The port used to bounce off walls BEFORE the paddle, which changes the
+     * outcome in the corner case where a ball touches both: the paddle's
+     * per-zone inc/dec_angle_x rewrites vx that the wall bounce then negates.
+     * (Monster collision still runs in its own later pass — a remaining,
+     * documented ordering deviation.)
      * ======================================================================= */
     for (i = 0; i < g->ball_count; i++) {
         if (!g->balls[i].active) continue;
 
-        /* Wall bounce — ghost balls bounce normally (no wall wrap).
-         * MAIN.ASM  detect_colision_wall:3497 */
-        {
-            int vx_before = g->balls[i].vx;
-            int vy_before_w = g->balls[i].vy;
-            collision_walls(&g->balls[i], 0);
-#if defined(BRICKBLASTER_MOBILE)
-            if (vx_before != g->balls[i].vx || vy_before_w != g->balls[i].vy)
-                platform_vibrate(5);
-#endif
-        }
 
         /* Ghost ball: explode on paddle contact — MUST run BEFORE the
          * paddle-bounce block below, because collision_paddle flips vy
@@ -2423,6 +2603,18 @@ void game_update(Game *g, const FrameInput *input) {
 #endif
         }
 
+        /* Wall bounce — ghost balls bounce normally (no wall wrap).
+         * MAIN.ASM  detect_colision_wall:3497 */
+        {
+            int vx_before = g->balls[i].vx;
+            int vy_before_w = g->balls[i].vy;
+            collision_walls(&g->balls[i], 0);
+#if defined(BRICKBLASTER_MOBILE)
+            if (vx_before != g->balls[i].vx || vy_before_w != g->balls[i].vy)
+                platform_vibrate(5);
+#endif
+        }
+
         /* Brick collision with trajectory interpolation.
          * MAIN.ASM  detect_colision_brique:3831 */
         bc = collision_bricks(&g->balls[i], g->bricks, BRICK_COUNT);
@@ -2464,15 +2656,28 @@ void game_update(Game *g, const FrameInput *input) {
                 continue;
             }
 
-            /* Sound on first brick hit.
-             * MAIN.ASM:4032  play_sound iff_normale   — normal brick
-             * MAIN.ASM:4055  play_sound iff_incassable — indestructible */
+            /* Sound on first brick hit — three cases:
+             *   MAIN.ASM:4055  iff_incassable → indestructible        (WALL)
+             *   MAIN.ASM:4032  iff_normale    → brick DESTROYED       (BOUNCE)
+             *   MAIN.ASM:4108  iff_multi      → damaged, still standing
+             * iff_multi is a multi-HIT brick surviving its hit, reached by
+             * `cmp B [esi+ebx],absente / jne @@redraw_brique`
+             * (MAIN.ASM:4004-4005), and its slot is aliased onto
+             * iff_incassable (FILE.ASM:744-746) — so it is WALL too. */
             if (g->audio) {
-                if (g->bricks[bc.brick_index].type == BRICK_INDESTRUCTIBLE) {
-                    audio_play(g->audio, SFX_WALL_HIT);
-                } else {
-                    audio_play(g->audio, SFX_BRICK_HIT);
+                int primary_destroyed = 0;
+                for (int hf = 0; hf < bc.hit_count; hf++) {
+                    if (bc.hit_indices[hf] == bc.brick_index) {
+                        primary_destroyed = bc.destroyed_flag[hf];
+                        break;
+                    }
                 }
+                if (g->bricks[bc.brick_index].type == BRICK_INDESTRUCTIBLE)
+                    audio_play(g->audio, SFX_WALL_HIT);
+                else if (primary_destroyed)
+                    audio_play(g->audio, SFX_BRICK_HIT);
+                else
+                    audio_play(g->audio, SFX_WALL_HIT);
             }
 #if defined(BRICKBLASTER_MOBILE)
             platform_vibrate(10);
@@ -2510,7 +2715,7 @@ void game_update(Game *g, const FrameInput *input) {
                 /* P0-ASM-1: score only on destroy, using inc_score helper for
                  * difficulty/night scaling + bonus-life trigger.
                  * MAIN.ASM:4024-4026 call inc_score (ecx=1) → 10/20/30 e/m/h. */
-                if (!g->demo_active && hdest) {
+                if (hdest) {
                     inc_score(g, g->balls[i].owner, 1);
                 }
 
@@ -2549,8 +2754,9 @@ void game_update(Game *g, const FrameInput *input) {
          * MAIN.ASM:3250-3256  pos_x += sens_x; pos_y += sens_y */
         ball_move(&g->balls[i]);
 
-        /* Check ball lost (exited bottom of screen).
-         * MAIN.ASM:4581  play_sound iff_lost_ball — ball falls off screen */
+        /* Check ball lost — the ball dies at the paddle's centre line
+         * (pos_y >= 424), not at the bottom of the screen; see ball_lost().
+         * MAIN.ASM:4581  play_sound iff_lost_ball */
         if (ball_lost(&g->balls[i])) {
             /* No break animation here: detect_destruction (MAIN.ASM:4526+)
              * just kills the sprite. The break_ball anim's only ASM sites are
@@ -2588,7 +2794,13 @@ void game_update(Game *g, const FrameInput *input) {
         if (!m->active) continue;
         for (j = 0; j < BRICK_COUNT; j++) {
             if (!g->bricks[j].active) continue;
-            if (g->bricks[j].type == BRICK_TRANSPARENT) continue;
+            /* Monsters bounce off EVERY live cell, transparent ones included.
+             * detect_brique reaches the level_flag test for any value that is
+             * neither absente nor invalide nor >= incassable, then does
+             *     cmp [edx.sprite_mode],monster / je @@exit   (MAIN.ASM:3993)
+             * and @@exit returns `stc` (MAIN.ASM:4063-4066) — a hit, with the
+             * `dec B [esi+ebx]` skipped so the brick takes no damage. The port
+             * used to let monsters fly through transparent bricks. */
             int col = j % BRICK_COLS;
             int row = j / BRICK_COLS;
             int bx = BRICK_ORIGIN_X + col * BRICK_W;
@@ -2675,13 +2887,11 @@ void game_update(Game *g, const FrameInput *input) {
                 /* P0-ASM-2: ecx=3 via inc_score helper → 30/40/50 e/m/h.
                  * MAIN.ASM:3210-3214 mov ebp,[edx.sprite_player]; mov ecx,3;
                  * call inc_score — attribute to ball owner. */
-                if (!g->demo_active) {
-                    inc_score(g, g->balls[i].owner, 3);
-                }
+                inc_score(g, g->balls[i].owner, 3);
                 /* Destroy monster: MAIN.ASM:3219  call del_monster.
                  * Iter 2 fix #6: ASM uses iff_del_monster → MONSTOFF.wav, not BOOM. */
                 monster_kill(&g->monsters[j]);
-                if (g->audio) audio_play(g->audio, SFX_POWERUP_LOST);
+                if (g->audio) audio_play(g->audio, SFX_DEL_MONSTER);
 #if defined(BRICKBLASTER_MOBILE)
                 platform_vibrate(30);
 #endif
@@ -2701,17 +2911,22 @@ void game_update(Game *g, const FrameInput *input) {
             if (pcx >= g->monsters[j].x && pcx < g->monsters[j].x + MONSTER_W &&
                 pcy >= g->monsters[j].y && pcy < g->monsters[j].y + MONSTER_H) {
                 monster_kill(&g->monsters[j]);
-                g->projectiles[i].active = 0;
+                /* Only the mini shoot dies here. _detect_colision_monster does
+                 *     cmp [edx.sprite_rebond],Off / je @@cont
+                 * (MAIN.ASM:3199-3200): a rebond-Off sprite — the big shoot,
+                 * MAIN.ASM:1946 — skips change_direction entirely and falls
+                 * straight into @@cont, which plays the sound, scores and
+                 * deletes the monster. Since @@shoot_off lives inside
+                 * change_direction, the big shoot is never consumed. */
+                if (!g->projectiles[i].is_big) g->projectiles[i].active = 0;
                 /* Iter 2 fix #6: iff_del_monster → MONSTOFF.wav, not BOOM. */
-                if (g->audio) audio_play(g->audio, SFX_POWERUP_LOST);
+                if (g->audio) audio_play(g->audio, SFX_DEL_MONSTER);
 #if defined(BRICKBLASTER_MOBILE)
                 platform_vibrate(30);
 #endif
                 /* P0-ASM-2: monster kill via projectile uses same inc_score
                  * helper for difficulty/night scaling. MAIN.ASM:3210. */
-                if (!g->demo_active) {
-                    inc_score(g, g->projectiles[i].owner, 3);
-                }
+                inc_score(g, g->projectiles[i].owner, 3);
                 break;
             }
         }
@@ -2754,11 +2969,13 @@ void game_update(Game *g, const FrameInput *input) {
     for (i = 0; i < g->powerup_count; i++) {
         if (!g->powerups[i].active) continue;
         /* P1-ASM-31: detect off-screen fall vs. timer expiry so we can
-         * play SFX_POWERUP_LOST on the fall case only (MAIN.ASM:5592). */
-        int off_screen_before = (g->powerups[i].y + OPTION_H + g->powerups[i].vy >= SCREEN_H);
+         * A powerup reaching the ground is SILENT. MAIN.ASM:5592 does
+         * `play_sound iff_lost_option`, but iff_lost_option (FILE.ASM:750) is
+         * the one sample slot with no matching name_iff_* string and no
+         * loadsample call — 17 loadsamples for 17 .iff files on disk, and this
+         * slot is not one of them. It stays 0, so the call is a no-op. */
         if (powerup_update(&g->powerups[i])) {
             /* powerup_update returns 1 when off-screen or timer expired */
-            if (off_screen_before && g->audio) audio_play(g->audio, SFX_POWERUP_LOST);
             g->powerups[i].active = 0;
             continue;
         }
@@ -2769,15 +2986,38 @@ void game_update(Game *g, const FrameInput *input) {
          * (READY_TO_PLAY_AGAIN) powerups keep falling but the idle paddle
          * must not scoop a residual multiball ("une balle est apparue sans
          * prévenir" player report).
-         * MAIN.ASM:347  play_sound iff_option — generic powerup collect sound
-         * Demo mode: play sound but do NOT apply powerup effects.
-         * DEMO_MODE_FIX.md: "No powerup effects applied when demo_flag=On". */
-        /* MP: check both paddles; the one that overlaps gets the powerup. */
+         * MAIN.ASM:5708  Play_Sound iff_option — the in-game pickup sound.
+         * (MAIN.ASM:347 is the same sample played on a MENU click, a different
+         * site that earlier revisions cited here by mistake.) */
+        /* MP: check both paddles; the one that overlaps gets the powerup.
+         * In DUEL the option is tagged with the player who destroyed the brick
+         * (random_options, MAIN.ASM:5525-5533) and only that player may take
+         * it — detect_prise_option guards both paddles with
+         *     cmp dual_flag,On / jne @@detected
+         *     cmp [edx.sprite_player],eax / jne @@player2   (MAIN.ASM:5626-5630)
+         * and the mirror image at MAIN.ASM:5648-5651 for cursor_2. In solo and
+         * coop dual_flag is Off, so the guard is skipped and either paddle
+         * collects. */
         int collected_by = -1;   /* 0 = P1, 1 = P2 */
         if (g->state == STATE_PLAYING) {
-            if (powerup_collected(&g->powerups[i], &g->paddle)) collected_by = 0;
-            else if (g->game_mode > 0 &&
+            int owner = g->powerups[i].owner;
+            int duel  = (g->game_mode == 2);
+            if ((!duel || owner == 0) &&
+                powerup_collected(&g->powerups[i], &g->paddle)) collected_by = 0;
+            else if (g->game_mode > 0 && (!duel || owner == 1) &&
                      powerup_collected(&g->powerups[i], &g->paddle_2)) collected_by = 1;
+        }
+
+        /* Duel easter egg — MAIN.ASM:5655-5670. If the collector is HOLDING
+         * their fire button at the moment of contact, current_player flips to
+         * the opponent: the effect and the +20 points go to the other player.
+         *     cmp eax,O player_1 / jne @@cont1
+         *     call read_click_player_1 / jz @@cont2
+         *     mov current_player,O player_2
+         * and symmetrically for player_2. */
+        if (collected_by >= 0 && g->game_mode == 2) {
+            int holding = (collected_by == 1) ? input->p2_fire : fire_pressed;
+            if (holding) collected_by ^= 1;
         }
 
         if (collected_by >= 0) {
@@ -2785,15 +3025,18 @@ void game_update(Game *g, const FrameInput *input) {
 #if defined(BRICKBLASTER_MOBILE)
             platform_vibrate(25);
 #endif
-            if (!g->demo_active) {
-                SPAWN_LOG(g, "powerup_collected: type=%d by=%d at x=%d y=%d",
-                          g->powerups[i].type, collected_by,
-                          g->powerups[i].x, g->powerups[i].y);
-                apply_powerup(g, g->powerups[i].type, collected_by);
-                /* MAIN.ASM:5710-5716 detect_prise_option: mov ecx,2; call inc_score
-                 * → +20 base, +difficulty bonus, x2 in night mode. */
-                inc_score(g, collected_by, 2);
-            }
+            /* No demo gate: detect_prise_option (MAIN.ASM:5605-5611) tests
+             * game_mode only, and demo_flag is never read by inc_score —
+             * FONTE.ASM contains zero references to it, as do MOUSE.ASM and
+             * HISCORE.ASM. The 1999 attract mode is a real game: it collects
+             * powerups, applies them and scores. */
+            SPAWN_LOG(g, "powerup_collected: type=%d by=%d at x=%d y=%d",
+                      g->powerups[i].type, collected_by,
+                      g->powerups[i].x, g->powerups[i].y);
+            apply_powerup(g, g->powerups[i].type, collected_by);
+            /* MAIN.ASM:5710-5716 detect_prise_option: mov ecx,2; call inc_score
+             * → +20 base, +difficulty bonus, x2 in night mode. */
+            inc_score(g, collected_by, 2);
             g->powerups[i].active = 0;
         }
     }
@@ -2822,8 +3065,14 @@ void game_update(Game *g, const FrameInput *input) {
     /* =======================================================================
      * STEP 8: Check all balls lost → lose life (or demo respawn)
      * MAIN.ASM:1088-1091  detect_game_over_player_1 / detect_game_over_player_2
-     * Demo mode: MAIN.ASM never reaches detect_game_over when demo_flag=On
-     *   because the frame loop returns early via demo_timer exit.
+     * Demo mode: PORT DEVIATION, deliberately kept and now labelled.
+     *   The 1999 attract mode DOES lose lives — MAIN.ASM:1088
+     *   `call detect_game_over_player_1` is unconditional and runs every frame,
+     *   long before the demo block at MAIN.ASM:1157-1168, and test_game_over
+     *   (MAIN.ASM:4666-4712) has no demo_flag or computer_flag guard anywhere
+     *   in the routine. Respawning instead keeps the attract loop simple.
+     *   Two earlier comments each invented a different ASM mechanism to
+     *   justify this ("demo_timer exit", "read_click exit"); neither exists.
      *   We implement as: respawn ball at fixed demo velocity.
      * ======================================================================= */
     if (g->state == STATE_PLAYING) {
