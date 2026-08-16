@@ -22,7 +22,7 @@ typedef struct {
     int tracks_loaded[MUSIC_COUNT];
     MusicTrack current;
     int initialized;
-    int music_enabled;   /* 1 = play normally, 0 = volume forced to zero   */
+    int music_volume;    /* 0..64, FILE.ASM:815 User_Volume                */
 } MusicManager;
 
 /* Initialize and load all music tracks */
@@ -36,7 +36,9 @@ void music_manager_update(MusicManager *mgr);
 
 /* Enable or disable music playback (volume 0 = silent, volume restored = enabled).
  * Does not stop the stream — toggling back on resumes immediately. */
-void music_manager_set_enabled(MusicManager *mgr, int enabled);
+/* Set the continuous music level, 0..64 (FILE.ASM:815). The 1999 menu VU
+ * meter writes this value straight from the cursor X (MAIN.ASM:674-677). */
+void music_manager_set_volume(MusicManager *mgr, int volume);
 
 /* Cleanup */
 void music_manager_cleanup(MusicManager *mgr);

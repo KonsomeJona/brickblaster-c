@@ -16,8 +16,8 @@ void screen_state_init(ScreenState *state) {
     state->hiscore_mode = 0;
     state->quit_requested = 0;
     state->dev_test = 0;
-    state->music_enabled = 1;
-    state->sfx_enabled = 1;
+    state->music_volume = 32;   /* FILE.ASM:815  User_Volume     db 32 */
+    state->sfx_volume   = 64;   /* FILE.ASM:816  User_Volume_Sfx db 64 */
     state->drag_enabled = 1;   /* finger drag ON by default */
     state->tilt_enabled = 0;   /* tilt OFF by default */
     state->button_speed = 3;   /* pad buttons: Medium */

@@ -37,3 +37,6 @@ void final_draw(FinalAssets *assets);
  * Must be called AFTER final_draw and BEFORE EndDrawing — it needs
  * access to the solo/coop vs duel game context. */
 void final_draw_modal(FinalAssets *assets, ScreenState *state, Game *game);
+
+/* Duel game-over panel (HISCORE.ASM:106-141). No FLC, no hiscore table. */
+void final_draw_dual_gameover(Game *game);

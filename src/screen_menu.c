@@ -34,6 +34,17 @@
  * Iter 2 fix #13: alias the canonical DELAI_DATTENTE constant from constants.h. */
 #define IDLE_TO_DEMO    DELAI_DATTENTE
 
+/* Music VU meter — Blaster.inc:44-52.
+ *   panel_music_pos    = (437, 454)
+ *   panel_music_vu_pos = panel_music_pos + (5, 5) = (442, 459)
+ *   panel_music_vu_size_y = 9 ; the bar's WIDTH is the volume itself. */
+#define MUSIC_VU_X   442
+#define MUSIC_VU_Y   459
+#define MUSIC_VU_H     9
+#define MUSIC_PANEL_X 437
+#define MUSIC_PANEL_Y 454
+#define MUSIC_PANEL_W  62
+
 /* Source rects in MENU.png for the 7 menu icons (Blaster.inc:23-29). */
 static const Rectangle ICON_SRC[7] = {
     /* icon_menu_1_o = 002+(640*49)  */ {  2,  49, ICON_W, ICON_H },
@@ -265,20 +276,64 @@ void menu_handle_input(ScreenState *state, MenuAssets *m, AudioState *audio,
         m->hover_button = hover;
     }
 
-    /* Idle counter — increments unless something changed. */
-    if (input->click_pressed || kb_changed || hover >= 0 ||
-        gamepad_confirm() || gamepad_start()) {
+    /* Music VU meter drag — MAIN.ASM:649-689 detect_button_music, called from
+     * the menu loop at MAIN.ASM:295. The hit zone is the 62 px trough grown by
+     * 10 px above and below (MAIN.ASM:652-667), and the level is taken raw
+     * from the cursor:
+     *     mov eax,cursor_1.sprite_pos_x
+     *     sub eax,panel_music_vu_pos_x
+     *     mov user_volume,al / mov master_volume,al
+     * The 1..64 clamp exists only for the bar's width, not for the stored
+     * value. Returning carry skips the rest of the menu handling that frame. */
+    {
+        Rectangle vu_zone = { MUSIC_VU_X, MUSIC_VU_Y - 10,
+                              MUSIC_PANEL_W, MUSIC_VU_H + 20 };
+        Vector2 cp = { (float)m->cursor_x, (float)m->cursor_y };
+        if (has_pointer && IsMouseButtonDown(MOUSE_LEFT_BUTTON) &&
+            CheckCollisionPointRec(cp, vu_zone)) {
+            int v = m->cursor_x - MUSIC_VU_X;
+            if (v < 0)  v = 0;
+            if (v > 64) v = 64;
+            state->music_volume = v;
+            m->idle_frames = 0;          /* MAIN.ASM:325-327  @@click re-arms */
+            return;
+        }
+    }
+
+    /* Idle counter. MAIN.ASM:569-583 detect_reset_ecx re-arms ONLY when the
+     * cursor position actually changed:
+     *     mov eax,cursor_1.sprite_pos_x / cmp eax,back_x / jne @@reset
+     *     mov ebx,cursor_1.sprite_pos_y / cmp ebx,back_y / jne @@reset
+     *     ret                       ; same position → keep counting
+     * A pointer resting motionless ON a button does not re-arm anything —
+     * the port used to reset on `hover >= 0`, which stalled the attract mode
+     * indefinitely whenever the mouse happened to sit over a quadrant.
+     * A click re-arms separately, via @@click (MAIN.ASM:325-327). */
+    if (m->cursor_x != m->last_cursor_x || m->cursor_y != m->last_cursor_y) {
+        m->last_cursor_x = m->cursor_x;
+        m->last_cursor_y = m->cursor_y;
+        m->idle_frames   = 0;
+    } else if (input->click_pressed || kb_changed ||
+               gamepad_confirm() || gamepad_start()) {
         m->idle_frames = 0;
     } else {
         m->idle_frames++;
     }
 
-    /* P1-ASM-16: Auto-demo on idle. MAIN.ASM:568-583 detect_reset_ecx
-     * plus DELAI_DATTENTE=600 (Blaster.inc:415) — attract-mode demo
-     * launches after ~10 s of no input on the main menu. Same entry
-     * conditions as the manual demo button above (P1-ASM-15). */
-    if (menu == 1 && m->idle_frames >= IDLE_TO_DEMO) {
+    /* P1-ASM-16: Auto-demo on idle, DELAI_DATTENTE=600 (Blaster.inc:415).
+     * Runs in EVERY menu, not just menu 1: get_menu has a single wait loop
+     * (MAIN.ASM:279-323) and every navigation jumps back to @@restart_menu →
+     * @@again2, which re-arms ecx. Falling through to ecx == 0 exits with
+     * `clc` (MAIN.ASM:321-323), and intro takes `jnc @@demo` (MAIN.ASM:67-68)
+     * whatever submenu the player was sitting in. */
+    if (m->idle_frames >= IDLE_TO_DEMO) {
         state->demo_flag  = 1;
+        /* MAIN.ASM:313-317 — the timeout exit resets the session settings
+         * before returning clc:
+         *   mov difficulte,MEDIUM / mov control_2,COMPUTER
+         *   mov nbs_player,1 / mov dual_flag,Off / mov coop_flag,Off
+         * nbs_player is then re-drawn by @@demo below, per MAIN.ASM:87-95. */
+        state->control_p2 = 0;   /* COMPUTER */
         /* Same draws as the demo button above — MAIN.ASM:87-95:
          * get_random(1)+1 for nbs_player, get_random(1) for world. */
         state->nbs_player = asm_get_random(1) + 1;
@@ -353,6 +408,23 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->assets->menu_image, lsrc, 0, 0, WHITE);
     }
 
+    /* 1c. Music VU meter — MAIN.ASM:788-820 Init_Cursor_Menu hijacks the
+     * ball_1 sprite as a red bar whose WIDTH is the volume:
+     *     movzx eax,user_volume
+     *     cmp eax,1  / jae @@ok2 / mov eax,1     ; clamp low
+     *     cmp eax,64 / jbe @@ok3 / mov eax,64    ; clamp high
+     *     mov [edx.sprite_size_x],eax
+     * Blaster.inc:47-52  panel_music_vu_red_o = 452+(screen_x*9), size_y 9,
+     * pos = panel_music_pos (437,454) + (5,5) = (442,459).
+     * The empty trough is already part of the menu background art. */
+    if (m->assets && m->assets->menu_image_loaded) {
+        int vol = state ? state->music_volume : 32;
+        if (vol < 1)  vol = 1;
+        if (vol > 64) vol = 64;
+        Rectangle vsrc = { 452, 9, (float)vol, (float)MUSIC_VU_H };
+        blit(m->assets->menu_image, vsrc, MUSIC_VU_X, MUSIC_VU_Y, WHITE);
+    }
+
     /* 2. Menu icon (259x260) at (189, 141), source from MENU.png. */
     if (m->assets && m->assets->menu_image_loaded) {
         Rectangle isrc = ICON_SRC[MENU_TO_ICON[menu]];
@@ -395,23 +467,23 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
                           ? i18n(menu_label(menu, m->hover_button))
                           : "";
 
-        /* Bottom strip holds the (stationary) menu title. */
-        DrawRectangle(0, 458, SCREEN_W, 22, (Color){0, 0, 0, 255});
-        draw_centered_string(font, title, SCREEN_W / 2, 464, WHITE);
+        /* Menu title at panel_menu (Blaster.inc:55-58): 330x22 at (155, 446),
+         * printed straight over the artwork with `transparence = On` — there
+         * is no backing plate in the original. The port used to paint a
+         * full-width black strip from y=458, which covered the music panel
+         * at (437,454) entirely. The art under the title averages ~60/255
+         * luminance, so white FONTE stays legible without it. */
+        draw_centered_string(font, title, 155 + 330 / 2, 446, WHITE);
 
-        /* Label trails the cursor, drawn over a short black backplate so
-         * it stays readable against the disc artwork.  Clamp X so the
-         * plate never runs off-screen. */
+        /* Hovered label trails the cursor. Also unplated: FONTE prints with
+         * transparence throughout (FONTE.ASM:177). */
         if (m->hover_button >= 0 && label && label[0]) {
-            int lw    = font_string_width(font, label);
-            int pad   = 6;
-            int plate_w = lw + pad * 2;
-            int plate_x = (int)m->cursor_x - plate_w / 2;
-            int plate_y = (int)m->cursor_y + CURSOR_H;
-            if (plate_x < 4) plate_x = 4;
-            if (plate_x + plate_w > SCREEN_W - 4) plate_x = SCREEN_W - 4 - plate_w;
-            DrawRectangle(plate_x, plate_y, plate_w, 18, (Color){0, 0, 0, 200});
-            draw_centered_string(font, label, plate_x + plate_w / 2, plate_y + 2, WHITE);
+            int lw      = font_string_width(font, label);
+            int label_x = (int)m->cursor_x;
+            int label_y = (int)m->cursor_y + CURSOR_H;
+            if (label_x - lw / 2 < 4)             label_x = 4 + lw / 2;
+            if (label_x + lw / 2 > SCREEN_W - 4)  label_x = SCREEN_W - 4 - lw / 2;
+            draw_centered_string(font, label, label_x, label_y, WHITE);
         }
     }
 }

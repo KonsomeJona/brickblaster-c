@@ -60,7 +60,8 @@ int input_touch_ui_active(void) {
 
 void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
                       int button_speed, int tilt_speed,
-                      int pause_button_hit, int in_game)
+                      int pause_button_hit, int in_game,
+                      int p2_uses_keyboard)
 {
     memset(out, 0, sizeof(*out));
 
@@ -87,9 +88,15 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     /* === Dev toggle === */
     out->dev_f9_pressed = IsKeyPressed(KEY_F9);
 
-    /* === Keyboard: directional === */
-    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))  out->move_left  = 1;
-    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) out->move_right = 1;
+    /* === Keyboard: directional ===
+     * A/D are a port convenience for P1 (the 1999 game drove cursor_1 from
+     * the mouse only — MOUSE.ASM Refresh_Mouse). They collide with P2's
+     * keyboard bindings, which are Q/A left and D right (MOUSE.ASM:33-72
+     * Refresh_Keyboard drives cursor_2), so a single A press used to move
+     * BOTH paddles left. Drop the aliases while P2 is on the keyboard;
+     * the arrow keys and the mouse are unaffected. */
+    if (IsKeyDown(KEY_LEFT)  || (!p2_uses_keyboard && IsKeyDown(KEY_A))) out->move_left  = 1;
+    if (IsKeyDown(KEY_RIGHT) || (!p2_uses_keyboard && IsKeyDown(KEY_D))) out->move_right = 1;
 
     /* === Gamepad: directional + analog === */
     if (gamepad_left_held())  out->move_left  = 1;

@@ -26,6 +26,9 @@ typedef struct {
 
 /* Load high score screen assets. game_assets is needed for FONTE. */
 void hiscore_screen_load(HiscoreScreenState *hs, Assets *game_assets);
+/* Blank the 15 name slots (HISCORE.ASM:291-294). */
+void hiscore_blank_name_entry(HiscoreScreenState *hs);
+
 
 /* Unload high score screen assets */
 void hiscore_screen_unload(HiscoreScreenState *hs);

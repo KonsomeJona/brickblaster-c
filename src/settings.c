@@ -229,9 +229,10 @@ int settings_load_cfg(GameConfig *cfg, const char *path) {
  *     User_Volume     db 32      ; range [0, 64]
  *     User_Volume_Sfx db 64      ; range [0, 64]
  *     user_cfg_len    = $ - user_cfg
- * Each byte is a volume level 0..64. We expose the value as a float in
- * [0,1] to callers by dividing by 64 and multiplying back on write. */
-int settings_load_usr(float *volume, float *volume_sfx, const char *path) {
+ * Each byte is a volume level 0..64, carried through unchanged. Collapsing
+ * them to on/off booleans destroys the player's setting: the .usr shipped
+ * with the game holds 22 40 hex = music 34, sfx 64. */
+int settings_load_usr(int *volume, int *volume_sfx, const char *path) {
     if (!volume || !volume_sfx || !path) return 0;
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
@@ -242,21 +243,22 @@ int settings_load_usr(float *volume, float *volume_sfx, const char *path) {
     /* Clamp to [0,64] (ASM range). */
     unsigned char b0 = bytes[0]; if (b0 > 64) b0 = 64;
     unsigned char b1 = bytes[1]; if (b1 > 64) b1 = 64;
-    *volume     = (float)b0 / 64.0f;
-    *volume_sfx = (float)b1 / 64.0f;
+    *volume     = (int)b0;
+    *volume_sfx = (int)b1;
     return 1;
 }
 
-int settings_save_usr(float volume, float volume_sfx, const char *path) {
+int settings_save_usr(int volume, int volume_sfx, const char *path) {
     if (!path) return 0;
-    /* Convert [0,1] float → [0,64] byte. Clamp on the way in. */
-    if (volume     < 0.0f) volume     = 0.0f;
-    if (volume     > 1.0f) volume     = 1.0f;
-    if (volume_sfx < 0.0f) volume_sfx = 0.0f;
-    if (volume_sfx > 1.0f) volume_sfx = 1.0f;
+    /* Stored verbatim as two 0..64 bytes — same layout the 1999 binary reads
+     * back (Read_Config_User, FILE.ASM:795-811). */
+    if (volume     < 0) volume     = 0;
+    if (volume     > 64) volume    = 64;
+    if (volume_sfx < 0) volume_sfx = 0;
+    if (volume_sfx > 64) volume_sfx = 64;
     unsigned char bytes[2] = {
-        (unsigned char)(volume     * 64.0f),
-        (unsigned char)(volume_sfx * 64.0f)
+        (unsigned char)volume,
+        (unsigned char)volume_sfx
     };
     FILE *f = fopen(path, "wb");
     if (!f) return 0;

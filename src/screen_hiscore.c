@@ -22,6 +22,36 @@
 #include "input_gamepad.h"
 #include "letterbox.h"
 
+/* Name-entry wheel alphabet — the FULL 1999 font, FONTE.ASM:418-419:
+ *   Fonte db 'abcdefghijklmnopqrstuvwxyz0123456789+-#!?:.& '  (45 glyphs)
+ * Get_name (HISCORE.ASM:312-316) accepts any byte in [0x20,0x80) and folds it
+ * with `or al,20h`, so punctuation is reachable in the original — the shipped
+ * Blaster.scr even contains "pas cool !!!!!". The port used to expose only
+ * 37 values (a-z, space, 0-9), making '!' and '.' impossible to enter. */
+#define NAME_CHARSET_SIZE 45
+static const char s_name_charset[NAME_CHARSET_SIZE + 1] =
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    "+-#!?:.& ";
+
+/* Index of ' ' in s_name_charset — the blank the wheel starts on. */
+#define NAME_SPACE_IDX 44
+
+/* HISCORE.ASM:291-294  Get_name blanks all 15 slots before reading input.
+ * Exposed so callers do not have to know where ' ' sits in the charset —
+ * it moved from 26 to 44 when the wheel grew to the full 45-glyph font. */
+void hiscore_blank_name_entry(HiscoreScreenState *hs) {
+    if (!hs) return;
+    for (int i = 0; i < HISCORE_NAME_LEN; i++) hs->letter_values[i] = NAME_SPACE_IDX;
+}
+
+static int name_char_to_value(char c) {
+    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    for (int i = 0; i < NAME_CHARSET_SIZE; i++)
+        if (s_name_charset[i] == c) return i;
+    return NAME_SPACE_IDX;
+}
+
 static BitmapFont s_font;
 static int s_font_ready = 0;
 
@@ -96,9 +126,7 @@ void hiscore_screen_load(HiscoreScreenState *hs, Assets *game_assets) {
     hs->entry_rank = 0;
     for (int i = 0; i < INPUT_NAME_LEN; i++) {
         char c = s_last_name[i];
-        if (c >= 'A' && c <= 'Z')       hs->letter_values[i] = c - 'A';
-        else if (c >= 'a' && c <= 'z')  hs->letter_values[i] = c - 'a';
-        else                            hs->letter_values[i] = 26;  /* space */
+        hs->letter_values[i] = name_char_to_value(c);
     }
 
     if (game_assets && game_assets->font_sheet_loaded) {
@@ -117,6 +145,22 @@ void hiscore_screen_unload(HiscoreScreenState *hs) {
     hs->loaded = 0;
 }
 
+
+/* Leave the hiscore table. MAIN.ASM:1092-1093 `cmp game_mode,NEW_PLAY / je
+ * @@play_again` then @@play_again (MAIN.ASM:1194-1211) sets READY_TO_PLAY and
+ * jumps to start_new_game (MAIN.ASM:995-1028), which resets current_level,
+ * nbs_ball and the score — a fresh game, with no trip through the menu.
+ * Only a table opened from the menu returns to the menu. */
+static void hiscore_leave(ScreenState *state) {
+    if (state->hiscore_from_game) {
+        state->hiscore_from_game = 0;
+        state->game_mode         = STATE_READY_TO_PLAY;
+    } else {
+        state->game_mode    = STATE_MENU;
+        state->current_menu = 6;
+    }
+}
+
 void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores *scores,
                            const FrameInput *input) {
     if (!state || !hs) return;
@@ -129,8 +173,7 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
             || wear_consume_crown_press()
 #endif
         ) {
-            state->game_mode = STATE_MENU;
-            state->current_menu = 6;
+            hiscore_leave(state);
         }
         return;
     }
@@ -138,9 +181,9 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
     /* Name entry mode — HISCORE.ASM:296-331.
      * Cycle through 37 values: 0..25=A..Z, 26=space, 27..36=0..9 (P1-ASM-19). */
     if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W) || gamepad_up_pressed())
-        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % 37;
+        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % NAME_CHARSET_SIZE;
     if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S) || gamepad_down_pressed())
-        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 36) % 37;
+        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + NAME_CHARSET_SIZE - 1) % NAME_CHARSET_SIZE;
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D) || gamepad_right_pressed()) {
         if (hs->name_entry_pos < INPUT_NAME_LEN - 1) hs->name_entry_pos++;
     }
@@ -155,10 +198,8 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
     int key = GetCharPressed();
     if (key >= 32 && key <= 122 && hs->name_entry_pos < INPUT_NAME_LEN) {
         int wrote = 1;
-        if (key >= 65 && key <= 90)       hs->letter_values[hs->name_entry_pos] = key - 65;
-        else if (key >= 97 && key <= 122) hs->letter_values[hs->name_entry_pos] = key - 97;
-        else if (key == 32)               hs->letter_values[hs->name_entry_pos] = 26; /* space */
-        else if (key >= 48 && key <= 57)  hs->letter_values[hs->name_entry_pos] = 27 + (key - 48);
+        if (key >= 32 && key < 128)
+            hs->letter_values[hs->name_entry_pos] = name_char_to_value((char)key);
         else                              wrote = 0;
         if (wrote && hs->name_entry_pos < INPUT_NAME_LEN - 1) hs->name_entry_pos++;
     }
@@ -168,7 +209,7 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
      * that: space the current slot (letter value 26) and decrement the
      * cursor if not already at the start. */
     if (IsKeyPressed(KEY_BACKSPACE)) {
-        hs->letter_values[hs->name_entry_pos] = 26;
+        hs->letter_values[hs->name_entry_pos] = NAME_SPACE_IDX;
         if (hs->name_entry_pos > 0) hs->name_entry_pos--;
     }
 
@@ -203,11 +244,11 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
                     break;
                 case NE_BTN_PREV_LETTER:
                     hs->letter_values[hs->name_entry_pos] =
-                        (hs->letter_values[hs->name_entry_pos] + 36) % 37;
+                        (hs->letter_values[hs->name_entry_pos] + NAME_CHARSET_SIZE - 1) % NAME_CHARSET_SIZE;
                     break;
                 case NE_BTN_NEXT_LETTER:
                     hs->letter_values[hs->name_entry_pos] =
-                        (hs->letter_values[hs->name_entry_pos] + 1) % 37;
+                        (hs->letter_values[hs->name_entry_pos] + 1) % NAME_CHARSET_SIZE;
                     break;
                 case NE_BTN_OK:
                     do_confirm = 1;
@@ -220,9 +261,9 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
 #if defined(PLATFORM_ANDROID)
 #if defined(BRICKBLASTER_MOBILE)
     if (mobile_left_pressed())
-        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 36) % 37;
+        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + NAME_CHARSET_SIZE - 1) % NAME_CHARSET_SIZE;
     if (mobile_right_pressed())
-        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % 37;
+        hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % NAME_CHARSET_SIZE;
     if (mobile_fire_pressed()) {
         if (hs->name_entry_pos < INPUT_NAME_LEN - 1) hs->name_entry_pos++;
         else do_confirm = 1;
@@ -231,9 +272,9 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
     {
         float rotary = wear_consume_rotary_delta();
         if (rotary > 0.3f)
-            hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % 37;
+            hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 1) % NAME_CHARSET_SIZE;
         else if (rotary < -0.3f)
-            hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + 36) % 37;
+            hs->letter_values[hs->name_entry_pos] = (hs->letter_values[hs->name_entry_pos] + NAME_CHARSET_SIZE - 1) % NAME_CHARSET_SIZE;
     }
     if (input->click_pressed || wear_consume_crown_press()) {
         if (hs->name_entry_pos < INPUT_NAME_LEN - 1) hs->name_entry_pos++;
@@ -254,10 +295,8 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
              * holding 'A'..'Z' would display blank names in the DOS binary. */
             for (int ni = 0; ni < HISCORE_NAME_LEN; ni++) {
                 int lv = hs->letter_values[ni];
-                char c;
-                if (lv >= 0 && lv < 26)       c = (char)('a' + lv);
-                else if (lv >= 27 && lv < 37) c = (char)('0' + (lv - 27));
-                else                          c = ' ';
+                if (lv < 0 || lv >= NAME_CHARSET_SIZE) lv = NAME_SPACE_IDX;
+                char c = s_name_charset[lv];
                 e->name[ni] = c;
                 s_last_name[ni] = c;
             }
@@ -265,8 +304,7 @@ void hiscore_screen_update(ScreenState *state, HiscoreScreenState *hs, Hiscores 
             hiscore_save(scores, "data/blaster.scr");
         }
         hs->name_entry_active = 0;
-        state->game_mode = STATE_MENU;
-        state->current_menu = 6;
+        hiscore_leave(state);
     }
 }
 
@@ -359,11 +397,8 @@ void hiscore_screen_draw(HiscoreScreenState *hs, Hiscores *scores, int mode) {
         if (is_entry_row) {
             for (int j = 0; j < INPUT_NAME_LEN; j++) {
                 int lv = hs->letter_values[j];
-                /* 0..25=a..z, 26=space, 27..36=0..9 (P1-ASM-19). */
-                char ch;
-                if (lv >= 0 && lv < 26)       ch = (char)('a' + lv);
-                else if (lv >= 27 && lv < 37) ch = (char)('0' + (lv - 27));
-                else                          ch = ' ';
+                if (lv < 0 || lv >= NAME_CHARSET_SIZE) lv = NAME_SPACE_IDX;
+                char ch = s_name_charset[lv];
                 char letter[2] = { ch, '\0' };
                 int lx = COL_NAME + j * LETTER_W;
 

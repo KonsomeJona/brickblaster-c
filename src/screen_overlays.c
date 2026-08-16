@@ -26,12 +26,6 @@ static int s_font_ready = 0;
  * (rounded translucent rect + border, TakoHi orange for the primary action). */
 static const Rectangle s_resume_rect = { 210, 196, 220, 56 };
 static const Rectangle s_exit_rect   = { 210, 270, 220, 56 };
-/* Tap targets wrapping the existing "music [m]" / "sfx [s]" lines
- * (drawn at PANEL_INFO_POS_Y - 52 / - 32, FONTE is 22 px tall). */
-static const Rectangle s_music_rect  = { PANEL_INFO_POS_X - 5,
-                                         PANEL_INFO_POS_Y - 56, 260, 24 };
-static const Rectangle s_sfx_rect    = { PANEL_INFO_POS_X - 5,
-                                         PANEL_INFO_POS_Y - 32, 260, 24 };
 
 static void draw_tap_zone(Rectangle r, const char *label, Color border) {
     DrawRectangleRounded(r, 0.18f, 6, (Color){30, 30, 44, 190});
@@ -64,22 +58,14 @@ void draw_ready_screen(ScreenState *state) {
 
 /* MAIN.ASM:1261 — option_text_paused
  *
- * Port adds a small in-pause audio toggle panel: M toggles music,
- * S toggles SFX. The state lines render above the main paused label
- * so the user can both see and change the flags without leaving play. */
+ * Nothing but the option_text_paused banner, as in MAIN.ASM:1150+. */
 void draw_pause_screen(ScreenState *state) {
     draw_option_text(i18n(STR_OPT_PAUSED));
     if (!state || !s_font_ready) return;
 
-    char buf[40];
-    snprintf(buf, sizeof(buf), "music [m]: %s",
-             state->music_enabled ? "on " : "off");
-    font_draw_string(&s_font, buf, PANEL_INFO_POS_X,
-                     PANEL_INFO_POS_Y - 52, WHITE);
-    snprintf(buf, sizeof(buf), "sfx   [s]: %s",
-             state->sfx_enabled ? "on " : "off");
-    font_draw_string(&s_font, buf, PANEL_INFO_POS_X,
-                     PANEL_INFO_POS_Y - 32, WHITE);
+    /* No audio panel here. `pause` (MAIN.ASM:1150+) prints option_text_paused
+     * and nothing else; audio level is set by the menu VU meter
+     * (MAIN.ASM:649-689 detect_button_music), which the port now draws. */
 
     /* Touch UI: explicit resume/exit tap targets — without them a touch
      * player is locked in the session until game over (no P/ESC key). The
@@ -97,17 +83,14 @@ void draw_game_over_screen(ScreenState *state, int *timer,
     (void)state; (void)timer;
     draw_option_text(i18n(STR_OPT_GAME_OVER));
 
-    /* Dual mode: show winner on an extra FONTE line above panel_info.
-     * Route through i18n so FR/ES/DE/IT/PT users see localised banners
-     * (F2-OVERLAY-02). 18-char FONTE-padded strings per option_text
-     * convention. */
-    if (game_mode == 2 && s_font_ready) {
-        const char *msg = (winner == 0) ? i18n(STR_OPT_P1_WINS)
-                        : (winner == 1) ? i18n(STR_OPT_P2_WINS)
-                                        : i18n(STR_OPT_DRAW);
-        font_draw_string(&s_font, msg, PANEL_INFO_POS_X,
-                         PANEL_INFO_POS_Y - 30, WHITE);
-    }
+    /* No winner banner here. MAIN.ASM:4678-4687 prints option_text_over and
+     * nothing else; the duel winner is announced by Display_score, which
+     * shows the final_dual panel with "one"/"two" patched into it
+     * (HISCORE.ASM:109-141) — that is screen_final's job, not an overlay.
+     * The "draw" case the port used to print cannot even occur: HISCORE.ASM:134
+     * tests player_2's counter alone, so there is always a winner. */
+    (void)game_mode;
+    (void)winner;
 }
 
 /* MAIN.ASM:6997 — option_text_demo */
@@ -122,15 +105,10 @@ void draw_play_again_screen(ScreenState *state) {
     draw_option_text(i18n(STR_OPT_PLAY_AGAIN));
 }
 
-/* Pause input: gamepad B exits to menu; M / S toggle audio flags.
- * Persistence of the flags to blaster.usr happens at shutdown
- * (main.c ~825) — the in-pause toggle only flips state flags,
- * the save pipeline picks them up unchanged. */
+/* Pause input: gamepad B exits to menu. Audio level lives in the menu VU
+ * meter, not here (MAIN.ASM:649-689). */
 int pause_handle_input(ScreenState *state, const FrameInput *input) {
     if (!state) return 0;
-
-    if (IsKeyPressed(KEY_M)) state->music_enabled = !state->music_enabled;
-    if (IsKeyPressed(KEY_S)) state->sfx_enabled   = !state->sfx_enabled;
 
     /* Gamepad B = exit to menu */
     if (gamepad_back()) {
@@ -151,14 +129,6 @@ int pause_handle_input(ScreenState *state, const FrameInput *input) {
             state->game_mode    = STATE_MENU;
             state->current_menu = 1;
             return 0;
-        }
-        if (CheckCollisionPointRec(cp, s_music_rect)) {
-            state->music_enabled = !state->music_enabled;
-            return 2;
-        }
-        if (CheckCollisionPointRec(cp, s_sfx_rect)) {
-            state->sfx_enabled = !state->sfx_enabled;
-            return 2;
         }
     }
     return 0;

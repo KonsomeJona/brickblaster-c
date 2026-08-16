@@ -159,6 +159,13 @@ static void init_game_session(void) {
      * compiled-in 3/4/4 — without this the port played the 1999 build's
      * defaults and 60/120 cells of the per-level speed table diverged. */
     game_set_change_speed(&game, cfg.change_speed_level);
+    /* Read_File_Config (FILE.ASM:936-1005) also overwrites nbs_ball_start
+     * (Nbs_Life minus one, FILE.ASM:950-951), speed_delai, speed_start_* and
+     * bonus_extra_life. The shipped Blaster.cfg carries exactly the compiled
+     * defaults, so this changed nothing until someone edited the file — at
+     * which point the port silently ignored them. */
+    game_set_cfg_scalars(&game, cfg.nbs_ball_start, cfg.speed_delai,
+                         cfg.speed_start, cfg.bonus_extra_life);
     /* Demo mode: transfer flag so game AI drives the paddle */
     if (state.demo_flag) game.demo_active = 1;
     /* Dev test mode: load test level with all brick types */
@@ -261,11 +268,11 @@ static void UpdateDrawFrame(void) {
 #endif
 
     /* Sync audio enable flags from screen state every frame */
-    audio.sfx_enabled = state.sfx_enabled;
-    static int prev_music_enabled = 1;
-    if (state.music_enabled != prev_music_enabled) {
-        music_manager_set_enabled(&music, state.music_enabled);
-        prev_music_enabled = state.music_enabled;
+    audio.sfx_volume = state.sfx_volume;
+    static int prev_music_volume = -1;
+    if (state.music_volume != prev_music_volume) {
+        music_manager_set_volume(&music, state.music_volume);
+        prev_music_volume = state.music_volume;
     }
 
     /* Update music based on current state (BEFORE music_manager_update) */
@@ -283,9 +290,13 @@ static void UpdateDrawFrame(void) {
                        state.game_mode == STATE_PAUSED ||
                        state.game_mode == STATE_READY_TO_PLAY ||
                        state.game_mode == STATE_READY_TO_PLAY_AGAIN);
+        /* P2 on the keyboard shares A/D with P1's aliases — see
+         * frame_input_poll. control_p2 == 1 is the keyboard mode
+         * (input_frame.c frame_input_poll_p2). */
+        const int p2_keyboard = (state.nbs_player > 1 && state.control_p2 == 1);
         frame_input_poll(&fi, state.drag_enabled, state.tilt_enabled,
                          state.button_speed, state.tilt_speed,
-                         0, in_game);
+                         0, in_game, p2_keyboard);
 
 #if defined(UWP_BUILD)
         /* DIAGNOSTIC: every 60 frames during PLAYING, dump input + paddle
@@ -709,11 +720,15 @@ static void UpdateDrawFrame(void) {
              * otherwise P2 wins. There is NO draw case — elimination is
              * asymmetric (once one player triggers game over, the other's
              * counter stops decrementing), so exactly one survivor exists. */
-            int winner = -1;
-            if (game.game_mode == 2)
-                winner = (game.lives_2 < 0) ? 0 : 1;
-            draw_game_over_screen(&state, &game_over_timer,
-                                  game.game_mode, winner);
+            if (game.game_mode == 2) {
+                /* HISCORE.ASM:106-141  Display_score with dual_flag On: the
+                 * final_dual panel with the winner label patched in — this is
+                 * the duel result screen, not an overlay banner. */
+                final_draw_dual_gameover(&game);
+            } else {
+                draw_game_over_screen(&state, &game_over_timer,
+                                      game.game_mode, -1);
+            }
         }
         EndTextureMode();
         BeginDrawing();
@@ -745,26 +760,34 @@ static void UpdateDrawFrame(void) {
             /* Coop mode 1: combined score P1+P2 (dual handled by early break above). */
             int hs_score = game.score;
             if (game.game_mode == 1) hs_score = game.score + game.score_2;
+            /* HISCORE.ASM:178-212  _Display_score runs Load_Score →
+             * detect_new_score → print_score UNCONDITIONALLY: the table is
+             * always shown after a game. Only the NAME ENTRY is conditional —
+             * detect_new_score leaves name_adrs = Off when the score does not
+             * qualify (HISCORE.ASM:235-237) and Get_name then falls straight
+             * to @@end (HISCORE.ASM:281-282, 341-344 `mov ecx,-1 / wait_click`),
+             * i.e. the table sits there until the player clicks. */
             if (hiscore_qualifies(&hiscores, hs_mode, hs_score)) {
                 int rank = hiscore_insert(&hiscores, hs_mode, "???????????????",
                                           hs_score, game.level_num);
                 hiscore_screen.entry_rank = (rank >= 0) ? rank : 0;
                 hiscore_screen.name_entry_active = 1;
                 hiscore_screen.name_entry_pos = 0;
-                /* HISCORE.ASM:291-294 - Get_name fills all 15 slots with ' ' before input.
-                 * letter value 26 = space. */
-                for (int _li = 0; _li < HISCORE_NAME_LEN; _li++)
-                    hiscore_screen.letter_values[_li] = 26;
-                state.hiscore_mode = hs_mode;
-                state.game_mode = STATE_HISCORE;
-                /* Drain any key still held from the game-over skip press —
-                 * without this, ENTER stays HELD into the hiscore screen and
-                 * IsKeyPressed(KEY_ENTER) only fires on the next release+press,
-                 * making the confirm button look broken. */
-                input_wait_click_release();
+                /* HISCORE.ASM:291-294 — blank all 15 slots before input. */
+                hiscore_blank_name_entry(&hiscore_screen);
             } else {
-                state.game_mode = STATE_MENU;
+                hiscore_screen.name_entry_active = 0;   /* table only */
             }
+            state.hiscore_mode      = hs_mode;
+            /* MAIN.ASM:4689  mov game_mode,NEW_PLAY — after the table the
+             * original starts a FRESH game, it does not return to the menu. */
+            state.hiscore_from_game = 1;
+            state.game_mode         = STATE_HISCORE;
+            /* Drain any key still held from the game-over skip press —
+             * without this, ENTER stays HELD into the hiscore screen and
+             * IsKeyPressed(KEY_ENTER) only fires on the next release+press,
+             * making the confirm button look broken. */
+            input_wait_click_release();
         }
         break;
 
@@ -953,16 +976,15 @@ int main(void) {
     settings_defaults(&cfg);
     (void)settings_load_cfg(&cfg, "data/blaster.cfg");
 
-    /* P1-ASM-24: restore persisted volume.  The ASM persists two bytes
-     * (User_Volume / User_Volume_Sfx); our .usr stores two floats in
-     * [0..1] range mapped to the state.music_enabled / sfx_enabled flags.
-     * On a missing file the defaults from screen_state_init() apply. */
+    /* P1-ASM-24: restore persisted volumes. FILE.ASM:795-811 Read_Config_User
+     * reads two bytes, each a level 0..64, and FILE.ASM:706-709 copies them
+     * into master_volume / master_volume_sfx. Defaults are the compiled ones
+     * (FILE.ASM:815-816) when the file is missing. */
     {
-        float vm = 1.0f, vs = 1.0f;
-        if (settings_load_usr(&vm, &vs, "data/blaster.usr")) {
-            state.music_enabled = (vm > 0.0f) ? 1 : 0;
-            state.sfx_enabled   = (vs > 0.0f) ? 1 : 0;
-        }
+        int vm = 32, vs = 64;
+        (void)settings_load_usr(&vm, &vs, "data/blaster.usr");
+        state.music_volume = vm;
+        state.sfx_volume   = vs;
     }
 
     /* Start with intro animation */
@@ -1023,9 +1045,8 @@ int main(void) {
     /* P1-ASM-24: persist current volume toggles to .usr so they survive a
      * restart — mirrors ASM Write_Config_User (FILE.ASM:822-832). */
     {
-        float vm = state.music_enabled ? 1.0f : 0.0f;
-        float vs = state.sfx_enabled   ? 1.0f : 0.0f;
-        (void)settings_save_usr(vm, vs, "data/blaster.usr");
+        (void)settings_save_usr(state.music_volume, state.sfx_volume,
+                                "data/blaster.usr");
     }
 
     intro_assets_unload(&intro);

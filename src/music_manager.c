@@ -47,7 +47,7 @@ void music_manager_init(MusicManager *mgr) {
         // Check if load succeeded
         if (mgr->tracks[i].ctxData != NULL) {
             mgr->tracks_loaded[i] = 1;
-            SetMusicVolume(mgr->tracks[i], MUSIC_DEFAULT_VOLUME);
+            SetMusicVolume(mgr->tracks[i], 32.0f / 64.0f);  /* FILE.ASM:815 default */
         } else {
             mgr->tracks_loaded[i] = 0;
             fprintf(stderr, "Warning: Failed to load %s (nor its .ogg variant)\n",
@@ -57,7 +57,7 @@ void music_manager_init(MusicManager *mgr) {
 
     mgr->current = MUSIC_BLASTER;
     mgr->initialized = 1;
-    mgr->music_enabled = 1;
+    mgr->music_volume = 32;   /* FILE.ASM:815 default */
 
     // Start with menu music if loaded
     if (mgr->tracks_loaded[MUSIC_BLASTER]) {
@@ -65,10 +65,14 @@ void music_manager_init(MusicManager *mgr) {
     }
 }
 
-void music_manager_set_enabled(MusicManager *mgr, int enabled) {
+void music_manager_set_volume(MusicManager *mgr, int volume) {
     if (!mgr || !mgr->initialized) return;
-    mgr->music_enabled = enabled;
-    float vol = enabled ? MUSIC_DEFAULT_VOLUME : 0.0f;
+    if (volume < 0)  volume = 0;
+    if (volume > 64) volume = 64;
+    mgr->music_volume = volume;
+    /* MAIN.ASM:676-677  mov user_volume,al / mov master_volume,al — the level
+     * is continuous, not a mute toggle. */
+    float vol = (float)volume / 64.0f;
     for (int i = 0; i < MUSIC_COUNT; i++) {
         if (mgr->tracks_loaded[i]) {
             SetMusicVolume(mgr->tracks[i], vol);

@@ -73,10 +73,14 @@ int input_touch_ui_active(void);
  * drag_enabled: 1=finger drag moves paddle (mobile)
  * tilt_enabled: 1=accelerometer tilt moves paddle (mobile)
  * pause_button_hit: 1 if the pause button was tapped (computed by main.c)
- * in_game: 1 if in gameplay state (mouse click = fire); 0 during menus */
+ * in_game: 1 if in gameplay state (mouse click = fire); 0 during menus
+ * p2_uses_keyboard: 1 when player 2 is on the keyboard (Q/A left, D right).
+ *   P1's A/D aliases are then dropped, because A and D would otherwise
+ *   drive both paddles at once. */
 void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
                       int button_speed, int tilt_speed,
-                      int pause_button_hit, int in_game);
+                      int pause_button_hit, int in_game,
+                      int p2_uses_keyboard);
 
 /* Poll P2 input based on control mode.
  * mode: 0=computer (zero input here; main.c calls demo_ai_player_2() after

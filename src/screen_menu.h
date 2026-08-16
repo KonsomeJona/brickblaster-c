@@ -32,6 +32,7 @@ typedef struct {
     int hover_button;    /* 0..3, or -1 if none (a=0, b=1, c=2, d=3) */
     int cursor_x, cursor_y; /* cursor position in canvas coords (for mouse display) */
     int idle_frames;     /* frames since last interaction (attract-mode demo) */
+    int last_cursor_x, last_cursor_y; /* MAIN.ASM:586-587  back_x / back_y */
 } MenuAssets;
 
 void menu_assets_load(MenuAssets *assets, Assets *game_assets);
