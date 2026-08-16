@@ -2,7 +2,7 @@
 
 <img src="img/BrickBlaster_banner.png" alt="Brick Blaster Banner">
 
-[![Status: preview](https://img.shields.io/badge/status-preview-orange)](#known-gaps-vs-the-1999-original)
+[![Status: preview](https://img.shields.io/badge/status-preview-orange)](#polish-checklist-vs-the-1999-original)
 [![Upstream ASM source](https://img.shields.io/badge/upstream-david4599%2FBrickBlaster-blue?logo=github)](https://github.com/david4599/BrickBlaster)
 [![EOS Archive](https://img.shields.io/badge/archive-david4599%2FBrickBlaster--EOS--Archive-blue?logo=github)](https://github.com/david4599/BrickBlaster-EOS-Archive)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL_v3-blue.svg)](LICENSE)
@@ -11,12 +11,12 @@
 
 ### ⬇️ [**Download the game here — Téléchargez le jeu ici**](https://github.com/KonsomeJona/brickblaster-c/releases/latest) — Windows / Linux / macOS
 
-> **Status: early preview, actively iterating.** The ASM-level internals
-> (gameplay constants, level format, XOR codec, power-up tables,
-> collision LUT) are ported byte-for-byte with ASM line citations. The
-> UI polish pass (menu layout, intro timing, a few power-up animations)
-> is still in flight — see the [polish checklist](#polish-checklist-vs-the-1999-original)
-> for what's being worked on next.
+> **Status: preview.** Gameplay internals (constants, level format, XOR
+> codec, power-up tables, collision LUT, frame pacing) are ported
+> byte-for-byte with ASM line citations, and the August 2026 parity pass
+> closed the remaining known divergences — see the
+> [checklist](#polish-checklist-vs-the-1999-original) and
+> [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md).
 
 > **Based on the original x86 assembly sources** of BrickBlaster,
 > released for MS-DOS on *Media Pocket 1999* by the **Eclipse** demomaker
@@ -38,7 +38,8 @@
 > function cites its ASM line in a comment.
 
 This port uses [raylib 5.0](https://www.raylib.com/) for rendering,
-audio, and input, and runs on Windows, macOS, Linux, and Android.
+audio, and input, and runs on Windows, macOS, Linux, the Web (WebAssembly)
+and Android (experimental — see [`android/README.md`](android/README.md)).
 
 ## What is BrickBlaster?
 
@@ -64,19 +65,29 @@ current state of play:
 - Scoring, per-difficulty spawn frequencies, `Time_Between_Option`
 - 24-entry `struc_options` power-up table + per-difficulty frequency triplets
 - High-score XOR codec and `blaster.scr` on-disk layout
-- Level file format (`.lv0` / `.lv1` / `.lv2`, 390 bytes × 80 levels)
+- Level file format (`.lv0` / `.lv1` / `.lv2`, 390 bytes × 80 slots, of
+  which 40 hold a real level — the rest are `0xFF` padding, and
+  `search_level_number` stops at the first one)
 - Sprite tile offsets and per-world palette selection
 - Timing constants (`DELAI_OPTION`, `DELAI_DEMO`, bonus life threshold,
   etc.)
 
-**In-flight polish pass** (see [checklist](#polish-checklist-vs-the-1999-original)):
-menu layout, intro timing, a few power-up animations, iron-ball /
-unbreakable-brick interaction, ESC-to-menu on desktop, teleport
-animation.
+⚠️ These claims describe the current `fix/asm-parity-2026-08` branch. The
+August 2026 audit found 8 major divergences in exactly these areas, and a
+follow-up pass found two more that changed how the game plays and looks:
+ball speed-ups ran 3x too slow (the port compensated a frame rate the
+shipped 1999 binary never had), and the world 1 backgrounds were converted
+through the wrong palette, so 858 718 pixels per screen were wrong and a
+dark veil had been added to hide them. **Releases up to v0.1.6 predate all
+of this** and do not have the parity their README claims.
 
-Per-iteration audit trail with ASM line citations:
-[audit-findings.md](audit-findings.md) and
-[audit-asm-faithful.md](audit-asm-faithful.md).
+Per-iteration audit trail with ASM line citations, newest first:
+- [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md) — full ASM ↔ C
+  parity audit (August 2026): the 8 P0 divergences, the P1/P2 tail, and
+  §6 quater, the pass that closed everything else
+- [audit-findings.md](audit-findings.md) — *ASM 100% Fidelity Audit (Iter 1)*,
+  April 2026
+- [audit-asm-faithful.md](audit-asm-faithful.md) — *Audit Findings*, April 2026
 
 ## Polish checklist vs the 1999 original
 
@@ -108,27 +119,35 @@ binary are genuinely useful — open an issue or a PR.
 - ✅ **Android doc**: `android/README.md` added (honest scaffold
   status).
 
-**Still on the list:**
-- **Menu**: pin the `Brick Blaster` logo at the top; swap the square
-  selection highlight for a rounded shape matching the logo; make
-  selection text follow the mouse; wire up the sound settings screen;
-  fix the cropped `MAIN MENU` header.
-- **Ball counter glitch**: players sometimes receive `3 balles`
-  mid-game with no powerup pickup — root-cause and fix (needs repro).
-- **Power-up animations**: paddle explosion / telepod / shoot
-  sequence wiring (`sprite_nbs_shape` animation system not yet
-  ported for paddle & powerups — only monsters animate today).
-- **Unbreakable brick reflet animation**: per-brick hit-triggered
-  ripple (`MAIN.ASM:4058-4061 + 6220-6240`), replacing the removed
-  ambient flicker.
-- **Credits menu**: prepend the `intro.flc` 36-frame animation before
-  the remaining credit letters (M / G / C / W / E), matching the
-  `@@credit` loop.
+**Also done (shipped in v0.1.5, this list was stale):** menu logo pinned
+with a rounded selection ring and cursor-following label; paddle
+explosion, telepod and muzzle-flash animations; hit-triggered reflet
+ripple on unbreakable bricks; the 36-frame `intro.flc` sequence in the
+Credits menu. The `3 balles` ball-counter glitch was root-caused in the
+August 2026 audit — power-ups were collectable during the `ready ?`
+screen, so a residual multi-ball fell onto the idle paddle; fixed by
+gating collection on `PLAYING` (`MAIN.ASM:5605`).
+
+**Still on the list:** nothing in the audit's P0-P2 lists. The August 2026
+parity pass closed the remaining divergences — one carried effect per player,
+attract-mode timing, end-of-game flow, `.usr` volumes and the menu VU meter,
+sound mapping, wall-bounce positioning, sprite z-order, and the `.cfg`-sourced
+end screens. See [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md) §6 quater.
+
+**Two things cannot be made identical, by nature:**
+- the audio was converted from `.iff` / `.mod` to WAV, which is not
+  bit-reversible;
+- the port decodes PNG, not the 1999 GIF/LZW decoder.
 
 ## Build
 
 ### Prerequisites
-- CMake ≥ 3.16
+- CMake ≥ 3.16. **With CMake ≥ 4 the `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`
+  flag in every command below is mandatory**, not optional: raylib is
+  pinned to 5.0, whose own `CMakeLists.txt` declares a
+  `cmake_minimum_required` below the 3.5 policy floor that CMake 4
+  removed. Without the flag, a bare `cmake -B build` fails at
+  `FetchContent_MakeAvailable(raylib)`.
 - C99 compiler (MSVC / GCC / Clang)
 - Internet access on first configure (raylib 5.0 is fetched via `FetchContent`)
 
@@ -146,8 +165,18 @@ cmake --build build
 ./build/brickblaster
 ```
 
+### Web (Emscripten)
+```bash
+emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build-web
+```
+Produces a static bundle; serve `build-web/` over HTTP (opening the
+`.html` from `file://` will not work).
+
 ### Android
-See `android/README.md` (Gradle + NDK).
+See [`android/README.md`](android/README.md) (Gradle + NDK). The APK is
+experimental: not yet soak-tested on a physical phone, and scores and
+settings do not persist.
 
 ### Build flags
 
@@ -163,29 +192,36 @@ cmake -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DTAKOHI_BRANDING=OFF -DGIF_RE
 
 ## Controls
 
-| Action | Keyboard | Gamepad |
-|---|---|---|
-| Move paddle | ← → / mouse | Left stick / D-pad |
-| Fire ball | Space | A (Cross) |
-| Pause | P / Esc | Start |
-| Back | Esc | B (Circle) |
-| Screenshot GIF | F12 | — |
+| Action | Keyboard | Gamepad | Touch |
+|---|---|---|---|
+| Move paddle | ← → / A D / mouse | Left stick / D-pad | Drag |
+| Fire ball | Space | A (Cross) | Tap |
+| Pause | P / Esc | Start | On-screen pause button |
+| Back | Esc | B (Circle) | On-screen button |
+| Toggle music / SFX | M / S (while paused) | — | — |
+| Screenshot GIF | F12 | — | — |
 
-**2-player keyboard** — P1 arrows + Space, P2 Q/A/D + F.
+**2-player keyboard** — P1 arrows (or A/D) + Space, P2 Q/A/D + F.
 **2-player gamepad** — P1 on gamepad 0, P2 on gamepad 1.
 
 ## Project structure
 
 ```
 src/              Game source (C99, raylib)
+web/              Emscripten shell + web build glue
+android/          Gradle project (experimental APK)
+img/              README banner and screenshots
 assets/
-  sprites/        Sprite atlases (PNG)
+  sprites/        Sprite atlases (PNG — SPRITE.png world 1, SPRITE0.png world 0)
   audio/          Sound effects (WAV, ex-IFF)
   music/          Music tracks (WAV, ex-MOD)
-  intro/          Intro animation frames (PNG)
+  intro/          Intro animation frames (36 PNG, ex-intro.flc)
   final/          Victory animation frames
   credits/        Credit slides
-  levels/         Level files (.lv0 / .lv1 / .lv2, 390 bytes × 80 levels)
+  menu/ title/    Menu and title screen art
+  takohi/         Publisher branding (stripped by -DTAKOHI_BRANDING=OFF)
+  levels/         Level files (.lv0 / .lv1 / .lv2 — 80 slots of 390 bytes,
+                  40 real levels then 0xFF padding)
   backgrounds/    Menu / hiscore backgrounds
 data/
   blaster.cfg     Optional runtime config override (mirrors ASM Blaster.cfg)
@@ -193,8 +229,9 @@ data/
   blaster.usr     Volume settings (2 bytes, per FILE.ASM:813)
 third_party/
   gif.h           Public-domain header-only GIF encoder (for F12 recorder)
-audit-findings.md       Iter 3 ASM fidelity audit report
-audit-asm-faithful.md   Iter 1/2 audit archive
+audit-2026-08-13-parity.md   Full ASM parity audit, August 2026
+audit-findings.md            ASM 100% Fidelity Audit (Iter 1), April 2026
+audit-asm-faithful.md        Audit Findings, April 2026
 ```
 
 ## Modifications from the 1999 original (GPL §5 notice)
@@ -204,7 +241,8 @@ section 5, the following prominent modifications were made in 2026:
 
 - Full C99 rewrite of the x86 assembly source using raylib 5.0 for
   rendering, audio, and input abstraction.
-- Target platforms extended from Windows/DOS to Linux, macOS, Android.
+- Target platforms extended from Windows/DOS to Linux, macOS, the Web
+  (WebAssembly) and Android.
 - Main loop converted from vsync-locked 70 Hz (DOS IRQ timer) to 60 Hz
   via raylib frame pacing with custom `SUPPORT_CUSTOM_FRAME_CONTROL`.
 - Palette-indexed VGA rendering replaced by RGBA textures. The palette
@@ -272,13 +310,17 @@ of the GPL v3.
 
 ## Release notes
 
-Every tagged release has a corresponding entry in [CHANGELOG.md](CHANGELOG.md).
+Release history lives in [CHANGELOG.md](CHANGELOG.md). The latest tag is
+`v0.1.5`; `0.1.6` has a changelog section but was never tagged, and the
+version in `CMakeLists.txt` is already `0.1.8`.
 
-**Release rule (enforced):** a PR that bumps the version or pushes a
-`vX.Y.Z` tag MUST add/update the matching `CHANGELOG.md` section BEFORE
-the tag is pushed. No changelog entry = no release. The workflow
-`.github/workflows/build.yml` ships the changelog alongside each
-binary artefact, and GitHub release notes are generated from it.
+**Release convention (by hand, not enforced):** a PR that bumps the
+version or pushes a `vX.Y.Z` tag should add or update the matching
+`CHANGELOG.md` section before the tag is pushed. Nothing checks this
+today — no CI job reads the changelog. `.github/workflows/build.yml`
+ships it alongside each binary artefact, but the GitHub release notes
+themselves are auto-generated from commits
+(`generate_release_notes: true`).
 
 ## Links
 

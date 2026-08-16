@@ -5,32 +5,177 @@ All notable changes to this project are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Rule** — every tagged release (`vX.Y.Z`) must have a corresponding entry
-here BEFORE the tag is pushed. Pull requests that bump the version without
-a `CHANGELOG.md` entry are rejected. See `CONTRIBUTING.md`.
+**Rule** — every tagged release (`vX.Y.Z`) should have a corresponding entry
+here BEFORE the tag is pushed. Nothing enforces this automatically today:
+no CI job checks the changelog, and `build.yml` generates GitHub release
+notes from commits (`generate_release_notes: true`), shipping this file
+inside the artefact rather than reading from it.
 
 ---
 
 ## [Unreleased]
 
+Version in `CMakeLists.txt` and `android/app/build.gradle` is already
+`0.1.8`; `v0.1.6` and `v0.1.7` were never tagged. Everything below is
+unreleased and lives on `fix/asm-parity-2026-08`.
+
 ### Added
-_nothing yet_
+- **Web (WebAssembly) target** — static Emscripten bundle, `web/shell.html`
+  and a `web.yml` CI workflow.
+- **Installable Android debug APK** — the Gradle project was a scaffold
+  before; plus `smallestScreenSize` / `sensorLandscape` handling for
+  tablets and foldables.
+- **CI matrix extended to 5 targets** — Linux x64/arm64, macOS universal,
+  Windows x64/arm64.
+- **Faithful 1999 random generator** (`src/asm_random.c`) — `calc_random`
+  and `get_random` ported bit for bit, defects included, verified over
+  100 000 draws against an independent x86 emulator. `wait_synchro`'s
+  per-frame tick is ported too.
+- **Side-wall pillars** — `create_border` (`MAIN.ASM:5825-5852`) stamps
+  five 42×96 tiles per side; the port had replaced them with a plain dark
+  veil.
+- **Active power-up icon in the HUD** — `panel_option` at (122, 446),
+  drawn from the `option_fade_o` row (`MAIN.ASM:5688-5694`). The port
+  showed a text banner and no icon.
 
 ### Changed
-_nothing yet_
+- **Demo / attract mode is a real game again** — score, power-up
+  collection and power-up effects are no longer suppressed. `demo_flag`
+  appears nowhere in `FONTE.ASM`, `MOUSE.ASM` or `HISCORE.ASM`, and never
+  inside `detect_prise_option`; the suppression was a port invention.
+- **P2 keyboard paddle speed** is re-derived at every ball launch as
+  2 × the launch speed (`MAIN.ASM:5345-5348`) — 4/6/8 by difficulty,
+  +2 per speed step — instead of the fixed `6` from `MOUSE.ASM:77`,
+  which is only the loader initialiser.
+- **Credits intro FLC now plays at 12 FPS** (`FILE.ASM:96-99`, five
+  vsyncs per frame) instead of 18, matching `FINAL_FPS` in
+  `screen_final.c` which already used the same derivation.
+
+- **Music VU meter in the menu** (Blaster.inc:44-52, MAIN.ASM:788-820 and
+  649-689) — drag it to set the music level. The empty trough was already
+  in the menu art; only the bar and the interaction were missing.
+
+### Removed
+- **KITT scanner** on the paddle LEDs (added in 0.1.6) — a non-ASM
+  invention, same class as the screen shake removed earlier.
+- **Dark side-panel veil.** It existed to hide "bright red side panels in
+  the source art" — which turned out to be a conversion artefact, not the
+  art. See the background fix below.
+- **`M`/`S` audio panel on the pause screen**, the winner/draw banner on
+  the duel game-over overlay, the editor key cheat-sheet, and the black
+  strip painted under the menu title (it covered the music panel). None
+  exist in the original.
+
+### Fixed — the two structural ones
+- **Ball speed-ups were 3x too slow.** The port scaled every speed counter
+  by 3 to compensate a supposed "ASM 18 fps". The shipped 1999 binary is
+  the WIN32/WinEOS build (`MAKEFILE`: `tasm32 … /dWIN32`, `wlink … system
+  wineos`), so the DOS branch of `wait_synchro` — VGA `0x3DA` poll *and*
+  the PIT pacer — is compiled out (DRAW.ASM:111-152). The real pacer is
+  WinEOS `Wait_Vbl`, one frame per vertical blank at 640x480 = 60 Hz, and
+  the main loop calls it exactly once per iteration (MAIN.ASM:1097).
+  1 ASM frame = 1 port frame. `SPEED_DELAI = 1500` is 25 s at level 1; the
+  port made it 75. (18.2 fps is what the never-shipped DOS path would have
+  given: 8 ticks of a 145.6 Hz PIT.)
+- **World 1 backgrounds were mis-converted — 858 718 pixels.**
+  `load_file_fond` calls `Create_Palette` with `ecx = 16*3`
+  (FILE.ASM:384-386): only palette entries 0..15 of a background GIF are
+  honoured, indices 16..255 come from `spriteN.pal` (FILE.ASM:250-255).
+  The eight `01_*` PNGs had been converted through the GIF's own palette,
+  where entries 229..243 are one flat red. Regenerated through
+  `Sprite1.pal`, they show the blue-grey machinery the original displayed.
+  Not one differing pixel was inside the play field.
 
 ### Fixed
-_nothing yet_
+- **Power-up drop probability was inverted** — `get_random` is inclusive
+  (mask + reject, `MAIN.ASM:5103-5127`) but the port used `rand() % N`,
+  giving 1/(freq-1) instead of 1/freq: a *guaranteed* drop at freq=2,
+  which is 15 of the 23 entries on easy. `COLLISION` (index 23) could
+  never be drawn.
+- **The campaign is 40 levels, not 80** — `search_level_number`
+  (`MAIN.ASM:5025`) stops at the first `0xFF`; each world file holds
+  exactly 15 600 `0xFF` bytes. The port ran 40 empty boards before the
+  victory screen, and halved the speed ramp along the way.
+- **Hard bricks took 7 hits instead of 4** — `draw_brique`
+  (`MAIN.ASM:4966-4973`) caps resistance at load time. 294 bricks across
+  the three worlds were affected.
+- **Demo mode never started**, then froze at level change.
+- **Every duel ended in a draw** — `test_game_over` (`MAIN.ASM:4674`)
+  ends the match at the *first* player out, with no `dual_flag` test.
+- **Per-world palette was not ported** — world 0 rendered with world 1's
+  colours (92 palette entries differ). Atlases regenerated from the
+  indexed `SPRITE.GIF`.
+- **Balls survived 47 px too long** — `detect_destruction`
+  (`MAIN.ASM:4526-4541`) kills the ball once its centre reaches the
+  paddle's centre line (`pos_y >= 424`); the port waited for it to clear
+  the whole 480 px screen.
+- **No explosion on losing a life** — `destroy_vaisseau`
+  (`MAIN.ASM:4792-4796`) plays `iff_explosion` then `iff_game_over`, and
+  `test_game_over` calls it from *both* branches. `SFX_EXPLOSION` was
+  loaded and never played anywhere in `src/`.
+- **`GHOST`, `ADD_MONSTER`, `MAGNETIC`, `FAST`, `SLOW`, `IRON`,
+  `TELEPOD`** — durations and semantics restored (one-shot, permanent
+  per ball, real expiry).
+- **Rendering** — power-up icons were sampled 2 px into the fade row;
+  player 2's ball was blue instead of green (the ASM `+9` is 9 *pixels*,
+  not 9 rows); the lives counter ran the wrong way and capped at 9
+  instead of 19; score and level were unformatted; the break animation
+  used stride 11 instead of 10 and fired at two invented sites.
+- **Mouse and keyboard were dead in the web build** since its first
+  commit — input is now polled at end of frame.
+- **Pause and quit were unreachable by touch.**
+- **One carried effect per player, not one per effect.** `SHOOT` + `LARGE`
+  + `REVERSE` used to stack. The ASM routes everything through
+  `player_current_option` (MAIN.ASM:5689), derives the paddle from it every
+  frame, shares one 600-frame timer, and lets any instant powerup strip
+  BOTH players. `option_small_ship_p`, `option_large_ship_p` and
+  `option_reverse_p` are bare `ret` (MAIN.ASM:6703, 6710, 6717).
+- **Attract mode ran only from menu 1 and stalled under a resting mouse.**
+  `get_menu` has a single wait loop for all seven menus
+  (MAIN.ASM:279-323), and `detect_reset_ecx` re-arms only when the cursor
+  position actually CHANGES (MAIN.ASM:569-583).
+- **The score table is shown after every game**, not only on a qualifying
+  score (`_Display_score` is unconditional, HISCORE.ASM:178-212), and a
+  fresh game starts automatically afterwards (`NEW_PLAY` → `@@play_again`
+  → `start_new_game`).
+- **`final_dual` was shown at victory instead of duel game over** — the
+  two HISCORE.ASM entry points were swapped. Both end panels now come from
+  the `.cfg` in FR/EN/ES, with the winner label written as four bytes at
+  index 16 (HISCORE.ASM:133-138) and the original Spanish alignment bug
+  reproduced rather than silently corrected.
+- **`.usr` volumes are 0..64 again.** The port collapsed them to booleans
+  and overwrote the player's file on exit; the shipped `.usr` holds
+  music 34 / sfx 64.
+- **Wall bounces no longer move the ball.** `detect_colision_wall` is
+  purely predictive and never writes the position (MAIN.ASM:3497-3535);
+  snapping shifted the trajectory by up to |v|-1 px per bounce.
+- **Monsters draw over balls and paddle**, per their declaration order
+  (MAIN.ASM:7096 vs 7066/7087), and the explosion runs 14 advances with
+  the first one resetting to frame 0 (DRAW.ASM:396-416).
+- **Magnetic catch applies the per-zone angle adjustment.**
+  `detect_magnetic_player_1` is a setter that returns; it does not
+  short-circuit MAIN.ASM:4219-4243.
+- **Sound mapping.** `iff_multi` is a multi-HIT brick surviving its hit,
+  aliased onto `wall.iff` — not multi-ball. Invented sounds removed (ball
+  spawn, telepod pickup, fast/slow pickup, powerup hitting the ground —
+  `iff_lost_option` is never loaded, so it is silent). Teleport,
+   four-corner probes now use the full sprite size (MAIN.ASM:1543-1559).
+- **Name entry exposes all 45 font glyphs** (FONTE.ASM:418-419) instead of
+  37 — punctuation was unreachable, yet the 1999 `.scr` contains
+  `pas cool !!!!!`.
 
 ---
 
-## [0.1.6] — 2026-04-30
+## [0.1.6] — 2026-04-30 (never tagged)
 
 ### Added
 - **Powerup pickup banner** in the HUD `panel_info` area.
 - **KITT scanner** animation on the paddle's three red lights (pixel-perfect LED crops, slower sweep).
 - **Touch buttons** for hiscore name entry (pen / tablet users).
-- **Windows multi-arch release**: `Win32` + `x64` + `ARM64` binaries.
+- **Windows `x64` release binaries.** (An earlier version of this entry
+  claimed `Win32` and `ARM64` too — `Win32` has never existed in
+  `.github/workflows/`, and Windows `ARM64` only arrives with the
+  unreleased 5-target matrix above.)
 
 ### Changed
 - **Audio**: paddle bounce now routes to `WALL.wav` so it no longer echoes the brick-hit sample.
@@ -169,7 +314,7 @@ _nothing yet_
   - WinEOS described as the Windows/DirectX port of EOS (Eclipse
     Operating System), not a generic "DirectX wrapper".
   - Localisation claim fixed: UI is fully translated to 6 languages
-    (EN/FR/DE/ES/IT/PT, 106 entries each), not "partial" for DE/IT/PT.
+    (EN/FR/DE/ES/IT/PT, 104 entries each), not "partial" for DE/IT/PT.
   - david4599 credited by his chosen pseudonym only (his request).
   - Port-author link deduped to a single `[Jonathan Odul
     (konsomejona)](https://github.com/konsomejona)` entry.
@@ -261,8 +406,9 @@ _nothing yet_
   `demo_move_x_player_1`).
 - 2-player coop (shared score & lives) and dual/versus (separate) modes.
 - Level editor with 5 brick types and `F10` clipboard xchg (EDITOR.ASM).
-- Intro + credits + victory FLC animations playing at the original 12 FPS
-  cadence (FILE.ASM:98 / 164).
+- Intro + victory FLC animations playing at the original 12 FPS cadence
+  (FILE.ASM:98 / 164). (The *credits* animation is not part of 0.1.0 — it
+  arrives in 0.1.5, and ran at 18 FPS until the Unreleased fix above.)
 - Compile flags `TAKOHI_BRANDING` and `GIF_RECORDER` (both `ON` by
   default, both can be turned off for a 100%-vanilla build).
 - Three iterations of automated ASM-fidelity audits resulting in
@@ -274,7 +420,10 @@ _nothing yet_
 ### Licence
 - GPL v3 — inherited from upstream david4599/BrickBlaster.
 
-[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.0...v0.1.1

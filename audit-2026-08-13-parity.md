@@ -224,9 +224,16 @@ rebond mur recalé en position (l'ASM ne touche jamais la position) · explosion
 décalée de 19 px au lieu de 16 · `last_random` (jamais deux fois le même tirage) non porté ·
 téléportation 1 px trop courte.
 
-Constantes mortes : `DELAI_INFO`, `DELAI_INFO_SOUND`, `CREDITS_SLIDE_TIMEOUT`,
-`DELAY_INTRO_1`, `SB_FREQ`. Chaînes i18n mortes : `STR_READY`, `STR_GAME_PAUSED`,
-`STR_GAME_OVER`, `STR_DEMO_LABEL`.
+**Bannière de power-up : l'audit avait raison, ma correction du §6 ter avait tort.**
+`DELAI_INFO` EST utilisé : `dec current_option_count / cmp current_option_count,DELAI_INFO /
+je @@display_info_off` (MAIN.ASM:6304-6306), avec `DELAI_INFO = DELAI_OPTION-100 = 500` et
+le compteur armé à 600 — le bandeau dure donc **100 frames**, pour tous les power-ups. Mon
+« non référencé dans l'ASM » du §6 ter venait d'un `grep` vide, et `grep` est cassé sur ces
+fichiers (voir l'avertissement en tête de §6 quater). Corrigé dans le port.
+`DELAI_INFO_SOUND`, lui, est bien mort : sa seule occurrence (MAIN.ASM:6307) est commentée.
+
+Constantes mortes côté port : `CREDITS_SLIDE_TIMEOUT`, `DELAY_INTRO_1`, `SB_FREQ`.
+Chaînes i18n mortes : `STR_READY`, `STR_GAME_PAUSED`, `STR_GAME_OVER`, `STR_DEMO_LABEL`.
 
 ---
 
@@ -314,6 +321,292 @@ changement le plus perceptible manette en main.**
 
 Non porté volontairement : le fond aléatoire de l'écran des scores (invention du port, sans
 site ASM — le brancher polluerait l'état global partagé).
+
+## 6 ter. Queue P1 traitée le 16 août 2026 — et vérifiée en exécution
+
+Cette passe a fermé le trou déclaré au §7 (« aucun finding n'a été confirmé en exécutant
+le jeu »). Le port a été compilé et **lancé** sous WSLg, et les correctifs visuels ont été
+confirmés sur des captures de la fenêtre réelle.
+
+**Corrigé, chaque ligne ASM ayant été rouverte :**
+
+- **`SFX_EXPLOSION` + `SFX_GAME_OVER` à chaque perte de vie.** `destroy_vaisseau`
+  (MAIN.ASM:4792) ouvre sur `play_sound iff_explosion` / `play_sound iff_game_over`, et
+  `test_game_over` l'appelle depuis **les deux** branches — MAIN.ASM:4685 (game over) et
+  MAIN.ASM:4703 (`@@cont`). `SFX_EXPLOSION` n'était joué nulle part.
+- **FLC des crédits 18 → 12 fps.** FILE.ASM:96-99 `mov ecx,5` / `loop @@wait`. Identique à
+  FILE.ASM:164-170 dont le port tirait déjà `FINAL_FPS 12.0f` : la valeur 18 contredisait
+  la constante sœur du port lui-même, et son commentaire (« standard FLC playback rate »)
+  était une invention — la cadence est celle que compte la boucle d'attente.
+- **Vitesse clavier P2.** MAIN.ASM:5345-5348 recalcule `speed_counter` à
+  `2 × |ball_2.sens_x|` à chaque lancement (4/6/8 selon la difficulté, +2 par palier).
+  `MOUSE.ASM:77 speed_counter dd 6` n'est que l'initialiseur du loader.
+- **Ligne de mort.** `detect_destruction` (MAIN.ASM:4526-4541) tue la balle dès que son
+  **centre** atteint `limite_y + cursor_size_y/2` = 416 + 12 = 428, soit `pos_y ≥ 424`, et
+  seulement en descente (`js @@end`). Le port attendait la sortie d'écran, `pos_y ≥ 471` —
+  47 px de rattrapage offerts.
+- **Gardes `demo_active` retirées (5 sites).** Vérification décisive : `demo_flag`
+  n'apparaît **dans aucun** autre module — zéro occurrence dans FONTE.ASM (`inc_score`),
+  MOUSE.ASM et HISCORE.ASM — et jamais dans `detect_prise_option` ni `test_game_over`.
+  L'attract mode de 1999 marque, ramasse et applique les power-ups.
+- **Piliers de bordure.** `create_border` (MAIN.ASM:5825-5852), 5 tuiles 42×96 par côté à
+  x=70 et x=528. Le voile sombre du port est conservé — il compense la patte palette de
+  `load_file_fond`, non portable — mais les piliers sont désormais dessinés par-dessus.
+- **Icône du power-up actif dans le HUD.** MAIN.ASM:5688-5694, à `panel_option` (122, 446),
+  échantillonnée sur `option_fade_o` (rangée 802). C'est l'unique consommateur de cette
+  rangée, ce qui confirme a posteriori que les icônes tombantes ne doivent jamais y toucher.
+
+**Hors parité, trouvé en vérifiant la table des contrôles du README :** `A` et `D` étaient
+liées **à la fois** au J1 et au J2 en clavier 2 joueurs (`input_frame.c`) — une seule
+touche déplaçait les deux raquettes. Les alias du J1 sont désactivés quand le J2 est au
+clavier. Le J1 de 1999 n'avait pas de liaison clavier du tout (`Refresh_Mouse`).
+
+**Deux erreurs de cet audit lui-même, corrigées :**
+
+- ~~Le §4 se trompait sur la bannière de power-up~~ — **c'est cette correction-là qui était
+  fausse**, et elle mérite d'être gardée comme avertissement. J'avais conclu « `DELAI_INFO`
+  n'est référencé nulle part dans l'ASM » à partir d'un `grep` vide. Or `grep` renvoie
+  silencieusement zéro résultat sur ces fichiers dans cet environnement : `DELAI_INFO` est
+  bien lu en MAIN.ASM:6305 et fixe la durée du bandeau à 100 frames. Le §4 avait raison.
+  Depuis, toute recherche dans l'ASM passe par `awk` et une lecture directe.
+- Le §3 donnait la ligne de mort à « `y ≥ 424`, 8 px sous le haut de la raquette ». Le
+  seuil est bien 424, mais l'écart est de 12 px (`cursor_size_y/2` = 25/2), et la
+  comparaison porte sur le centre de la balle, pas sur son bord.
+
+**Nouvelle question ouverte — le voile latéral.** En posant les piliers on a vérifié
+`load_file_fond` (FILE.ASM:374-386) : il met à zéro les entrées **0 et 15 de la palette du
+GIF de fond entier**, puis appelle `create_border` (FILE.ASM:388), puis copie dans
+`background_buffer`. Ce n'est donc **pas** un assombrissement des colonnes latérales, et le
+voile semi-transparent du port n'en est pas l'équivalent — sa vraie justification, écrite
+dans le port, est de masquer les panneaux vifs de l'art source. Les piliers ne couvrant que
+70..112 et 528..570, le voile reste visible de part et d'autre : de l'art authentique posé
+sur un assombrissement inventé. Le voile devrait probablement disparaître, le blackout de
+palette étant refait au chargement dans `assets.c` (précédent existant au même endroit pour
+le logo). Changement visuel à valider seul, non fait ici.
+
+**Toujours ouvert** (inchangé) : slot d'option unique par joueur, fondus `Shade_On/Off`,
+relance automatique après game over, table des scores toujours affichée, noms de high score
+en minuscules, `final_text`/`final_dual` en anglais codé en dur, écran de réglages sonores
+non câblé.
+
+## 6 quater. Passe de parité totale — 16 août 2026
+
+Objectif : fermer **toutes** les divergences restantes. Quatre clusters instruits en
+parallèle (règles, audio, rendu, textes/sauvegardes), chaque verdict rendu en citant les
+deux côtés. Tout ce qui suit est appliqué, compilé et vérifié en exécution.
+
+### Les deux découvertes structurelles
+
+**La cadence était fausse d'un facteur 3.** Le `MAKEFILE` assemble `tasm32 … /dWIN32` et
+lie `system wineos` : le binaire de 1999 est la variante **WIN32/WinEOS**, donc toute la
+branche DOS de `wait_synchro` — poll VGA `0x3DA` *et* pacer PIT `timer_counter >= 8` — est
+compilée hors du binaire (DRAW.ASM:111-152, `ifndef WIN32 … else … endif`). Le vrai
+cadenceur est `Wait_Vbl` de WinEOS : **une frame par vertical blank en 640×480, soit
+60 Hz**, et `wait_synchro` n'est appelé qu'une fois par tour de boucle (MAIN.ASM:1097).
+Le port compensait un « ASM à 18 fps » par un ×3 sur 7 sites — 18,2 fps est ce que donnait
+le chemin DOS (8 ticks d'un PIT à 145,6 Hz), du code jamais livré. Conséquence mesurable :
+`SPEED_DELAI = 1500` vaut 25 s au niveau 1, le port en faisait 75. Le mapping est **1:1**,
+ce que confirment `DELAI_OPTION = 600` et `DELAI_DATTENTE = 600` (10 s chacun), que le port
+utilisait déjà tels quels. Preuve consignée en tête de `game.h`. Le « 70 Hz VGA » cité au
+§7 est également faux : 640×480 se rafraîchit à 60 Hz, le 70 Hz est le mode 13h.
+
+**Les fonds du monde 1 étaient de mauvaises conversions.** `load_file_fond` appelle
+`Create_Palette` avec **`ecx = 16*3`** (FILE.ASM:384-386) : seules les entrées 0..15 de la
+palette du GIF de fond comptent, les index ≥ 16 sont rendus avec `spriteN.pal`, chargée une
+fois par monde (FILE.ASM:250-255). Les 8 PNG `01_*` avaient été convertis via la palette du
+GIF, où les entrées 229..243 sont un aplat rouge unique — d'où les « panneaux rouges vifs de
+l'art source » que le voile latéral du port avait été inventé pour masquer. **858 718 pixels
+corrigés** en régénérant via `Sprite1.pal` ; 0 pixel d'écart dans le terrain, tous les écarts
+étaient dans les panneaux. Le voile est supprimé et la machinerie bleu-gris d'origine
+apparaît. Le monde 0 était déjà correct (5 px sur `00_07`). Vérifié aussi : `Blaster.png`
+(menu) est légitimement une conversion naïve, `Load_Picture_Menu` utilisant
+`Create_Palette` avec `ecx = 256*3` (FILE.ASM:216-220).
+
+### Règles de jeu
+
+- **Un seul slot d'option par joueur.** `player_option[2]` + `sync_paddle_from_option`,
+  dérivé chaque frame comme `detect_large/small_cursor_*` et `detect_shoot_*`
+  (MAIN.ASM:1071-1076). Preuve qu'aucun compteur par raquette n'existe :
+  `option_small_ship_p`, `option_large_ship_p` et `option_reverse_p` sont des `ret` nus
+  (MAIN.ASM:6703, 6710, 6717) ; les `count_tir_*` sont des compteurs d'animation de canon
+  (MAIN.ASM:1897-1903). Tout power-up instantané efface les **deux** joueurs, le timer de
+  600 frames est partagé, `MAGNETIC` restaure `old_option` dans les trois slots
+  (MAIN.ASM:6745-6750), et le gros tir se consomme (MAIN.ASM:1947-1948, 2156-2157).
+- **Attract mode** dans **tous** les menus (`get_menu` n'a qu'une boucle,
+  MAIN.ASM:279-323), réarmé uniquement quand la position du curseur **change**
+  (`detect_reset_ecx`, MAIN.ASM:569-583) — un survol immobile bloquait la démo
+  indéfiniment. Reset de `control_2 = COMPUTER` au timeout (MAIN.ASM:314).
+- **Prise magnétique** : `detect_magnetic_player_1` est un simple setter qui `ret`
+  (MAIN.ASM:4398-4439), il n'interrompt pas la séquence — la balle accrochée reçoit donc
+  aussi `neg sens_y` et l'ajustement d'angle par zone (MAIN.ASM:4219-4243).
+- **Fin de partie** : la table des scores est **toujours** affichée
+  (`_Display_score` est inconditionnel, HISCORE.ASM:178-212 ; seule la saisie du nom est
+  conditionnelle, HISCORE.ASM:235-237 / 281-282), et une partie neuve est relancée
+  automatiquement (`NEW_PLAY` → `@@play_again` → `start_new_game`, MAIN.ASM:1092-1093,
+  1194-1211, 995-1028) au lieu d'un retour menu.
+- **Score coop** : vérifié **conforme**. `inc_score` force `ebp = player_1` hors duel
+  (FONTE.ASM:88-91), et le port ne sépare les compteurs qu'en `game_mode == 2`.
+
+### Audio
+
+Table reconstruite depuis les **alias de labels** de FILE.ASM:728-770, recoupée par
+17 `loadsample` pour exactement 17 `.IFF` sur disque :
+
+- `iff_death` ≡ `iff_game_over` → `death.iff` ;
+- `iff_incassable` ≡ `iff_cursor` ≡ `iff_multi` → `wall.iff` ;
+- `iff_lost_option` n'a **aucune** entrée `name_iff_*` → jamais chargé → **silence**.
+
+Corrigé : `iff_multi` est une brique **multi-coups survivante** (`cmp B [esi+ebx],absente /
+jne @@redraw_brique`, MAIN.ASM:4004-4005), pas une multiballe — `SFX_MULTI_BALL` supprimé,
+le son de brique a désormais ses trois cas. Sons inventés retirés : spawn de balles,
+`TELEPOD` sur le power-up, `SPEEDUP` sur `FAST`/`SLOW` (les quatre handlers sont des `ret`,
+MAIN.ASM:6613-6636), et power-up touchant le sol. `SFX_POWERUP_LOST` renommé
+`SFX_DEL_MONSTER` : il jouait déjà le bon fichier sous un nom trompeur. Le commentaire de
+`audio.c` qui se déclarait « port deviation » sur le rebond raquette était faux — le
+comportement était fidèle.
+
+### Rendu
+
+- **Rebond mural** : `detect_colision_wall` (MAIN.ASM:3497-3535) est purement prédictif et
+  n'écrit **jamais** la position ; le port recalait la balle sur le mur, décalant sa
+  trajectoire de jusqu'à |v|−1 px à chaque rebond.
+- **Ordre z** : les monstres sont déclarés après les balles et les vaisseaux
+  (MAIN.ASM:7096 vs 7066/7087) et `Draw_sprites` parcourt la table en ordre mémoire
+  (DRAW.ASM:426-434) — l'explosion 70×70 passait sous la raquette.
+- **Explosion de monstre** : arrêt à `to_delete == 1` (14 avances, DRAW.ASM:396-400) et
+  première avance = **reset** et non incrément (`cmp current_shape,1 / jbe @@reset`,
+  DRAW.ASM:403-416, `current_shape` initialisé à 1 par MAIN.ASM:3080).
+- **Téléportation** : les quatre sondes utilisent la taille **pleine** du sprite
+  (MAIN.ASM:1543-1559), pas taille−1.
+- **Icônes de power-up** : `get_powerup_rect` expose les trois rangées de l'atlas comme
+  décalages nommés (`OPTION_ROW_FALL/P2/FADE`) au lieu d'une mutation après coup.
+
+### Textes, scores, sauvegardes
+
+- **`final_text` / `final_dual`** en FR/EN/ES depuis les `.cfg` (`read_text_final`,
+  FILE.ASM:1089-1110), patch `winner` par **`memcpy` de 4 octets à l'index 16**
+  (HISCORE.ASM:133-138) — bug d'alignement du `.cfg` espagnol reproduit tel quel.
+  Géométrie exacte : x = 120, y = 52, interligne 30 (FONTE.ASM:171-184, 370, 416), tracés
+  par-dessus la dernière image du FLC (`transparence = On`) et non sur du noir.
+- **`final_dual` déplacé de la victoire vers le game over duel** : `Display_score_from_final`
+  sort sur `dual_flag` (HISCORE.ASM:28-29) alors que `Display_score` n'affiche `final_dual`
+  **que** en duel (HISCORE.ASM:109-141). Le port avait les deux inversés. La bannière
+  « player 1 wins / draw » de l'overlay est supprimée : elle n'existe pas, et le match nul
+  est impossible (HISCORE.ASM:134 ne teste que P2).
+- **Volumes `.usr`** : deux octets 0..64 (FILE.ASM:815-816), portés tels quels de bout en
+  bout. Le port les réduisait à des booléens et **écrasait le fichier du joueur à la
+  sortie**. Le **VU-mètre musique du menu** est implémenté (Blaster.inc:44-52, dessin
+  MAIN.ASM:788-820, glissé `detect_button_music` MAIN.ASM:649-689) ; le panneau `M`/`S` de
+  la pause, qui n'existe pas dans l'original, est retiré. Le bandeau noir plein écran que
+  le port peignait sous le titre du menu masquait le VU-mètre : supprimé, le titre est
+  imprimé à `panel_menu` = (155, 446) par-dessus l'art comme dans l'original.
+- **Saisie des scores** : la roue expose les **45 glyphes** de la fonte
+  (FONTE.ASM:418-419) au lieu de 37 — la ponctuation était inaccessible alors que le
+  `.scr` de 1999 contient `pas cool !!!!!`.
+- **Éditeur** : les deux lignes d'aide inventées sont remplacées par la seule bannière
+  `option_text_editor` du `.cfg` (EDITOR.ASM:54-55).
+- **Vérifiés conformes** : codec XOR et format `.scr` (le `.scr` de 1999 se décode
+  correctement avec l'algorithme du port — un fichier écrit par le port est relisible par
+  le binaire DOS), noms en minuscules, et les 24 libellés de power-up FR/EN/ES, comparés
+  octet à octet aux `.cfg` (87 chaînes, 0 écart). Une seule correction : `cooperado.` en ES.
+
+### Erreurs de cet audit corrigées
+
+- `DELAI_INFO` / `DELAI_INFO_SOUND` sont morts **dans l'ASM aussi** — le port était fidèle.
+- La ligne de mort est bien à 424 mais l'écart est de 12 px (`cursor_size_y/2`) et la
+  comparaison porte sur le **centre** de la balle.
+- Le « 70 Hz VGA » du §7 : la résolution est 640×480, donc 60 Hz.
+- L'affirmation d'un son inventé sur le rebond raquette : le port était fidèle.
+
+### Ce qui restera hors d'atteinte
+
+La conversion audio `.iff`/`.mod` → WAV n'est pas réversible au bit près, et le décodeur
+GIF/LZW du port n'est pas celui de 1999. Ces deux points ne peuvent pas être « corrigés »,
+seulement documentés.
+
+
+## 6 quinquies. Double passe croisée ASM ↔ C — 16 août 2026
+
+Deux agents lancés en parallèle, un par sens, avec interdiction d'affirmer sans avoir
+ouvert les deux côtés. Chaque finding retenu ci-dessous a ensuite été **rouvert à la main**
+avant correction.
+
+### Sens ASM → C (omissions) — 16 findings sur 17 appliqués
+
+Le plus lourd : **la perte de vie ne réinitialisait presque rien**. `test_game_over` sort en
+`stc` sur la branche « on continue » et la boucle fait `jc start_game` (MAIN.ASM:1089) ;
+`start_game` (1036-1045) appelle `init_sprites` — `sprite_status,Off` sur **tous** les
+sprites hors panneau — plus `reset_magnetic` et `reset_ghost`, puis tombe dans
+`rebuild_all` → `init_monster`. Le port ne vidait que les power-ups. Même chemin au
+changement de niveau (`_next_level` finit par `jmp start_game`, MAIN.ASM:968).
+
+Ensuite : **un seul clic lance les deux balles** (`detect_start_game` n'a qu'un
+`call read_click`, MAIN.ASM:5286, et `read_click` agrège souris/CTRL/joystick) ; **le gros
+tir traverse tout**, incassables et monstres compris (`sprite_rebond,Off` MAIN.ASM:1946 →
+jamais de `new_direction` 3863-3864 → `change_direction` sort avant `@@shoot_off`) ; **en
+duel l'option est réservée à celui qui a cassé la brique** (5626-5630), avec l'easter egg
+qui la **donne à l'adversaire** si le ramasseur tient son bouton (5655-5670) ; **5 slots de
+monstres** et non 4 (`nbs_monster = 4` n'apparaît que dans une ligne commentée,
+MAIN.ASM:2932) ; monstres rebondissant sur les transparentes (3993-3994 + `stc`) ; balle de
+fer traversant les téléporteuses ; GHOST refait (`set_ghost` marque **toutes** les balles du
+ramasseur, `unghost_one_ball` en dé-marque une) ; positions de tir (18 px au-dessus de la
+raquette pour les deux types, gros tir centré sur la largeur **courante**) ; retirage sur
+fréquence 0 (`@@again` est une boucle, 5508-5509) ; graine `speed_delai` ; tir automatique
+en démo (`@@auto_shoot`, 1907-1920) ; scalaires du `.cfg` injectés ; timer d'option gelé
+hors `PLAYING` (6298-6300) ; **bandeau de power-up à 100 frames** (voir ci-dessous).
+
+Non appliqué, assumé : la barre d'espace qui relance une partie neuve (MAIN.ASM:1173-1181)
+— Espace est le tir dans le port.
+
+### Sens C → ASM (hallucinations) — 2 025 citations extraites, ~620 vérifiées
+
+Taux constaté : **~88 % exactes, 7-8 % à ±1-4 lignes, 4-5 % franchement fausses.**
+
+**Un bug de gameplay mort, introduit par le refactor du slot d'option** : `POWERUP_NIGHT`
+s'auto-annulait. Son `case` posait `night_active = 1`, puis la branche `default:` du second
+switch le remettait à 0 dans le même appel. La pastille jouait son son et ne faisait plus
+rien. Le `night_active = 0` ne concerne en réalité que iron / telepod / fast / slow, dont
+`@@reset_current_option` (MAIN.ASM:2895-2898) laisse `current_option` visible une frame à
+`detect_init_palette` (6667-6677).
+
+Autres corrections de fond : la **vie bonus annule l'option des deux joueurs**
+(`option_new_life_p`, MAIN.ASM:6441-6443) ; la **balle de fer déclenche son et reflet** sur
+l'incassable (`@@collision` joue `iff_incassable` et arme le reflet quel que soit le rebond,
+4048-4062) ; l'ordre par balle est **raquette → mur** et non l'inverse (2864-2871).
+
+**Citations fausses corrigées** : ~20 numéros `Blaster.inc` systématiquement décalés dans
+`draw.c` (valeurs justes, lignes fausses — `brique_classic_o` 342→345, `brique_beton_o`
+350→342, `vaisseau_large_1_o` 281→284…) ; le label **`load_decor` qui n'existe nulle part**
+(le vrai chemin est `next_fond` → `load_file_fond`) ; `MAIN.ASM:347` recyclé dans 7 endroits
+pour le ramassage en jeu alors que c'est le **clic de menu** (le vrai site est 5708) ;
+`MAIN.ASM:133-138` au lieu de `HISCORE.ASM` pour le patch `winner` ; une douzaine
+d'off-by-1-à-4.
+
+**Deux justifications entièrement inventées, supprimées** : le port affirmait que l'ASM
+n'atteint jamais `detect_game_over` en démo — avec **deux mécanismes différents et
+contradictoires** selon le fichier (« demo_timer exit » / « read_click exit »). Ni l'un ni
+l'autre n'existe : MAIN.ASM:1088 est inconditionnel et `test_game_over` n'a aucune garde
+`demo_flag`. L'attract mode de 1999 perd bien ses vies. Le respawn du port est conservé mais
+désormais **étiqueté comme déviation**, pas comme fidélité. De même, l'explication du
+`sar eax,1` de la table de trajectoire (« demi-pas avant le bord de la balle ») était fausse :
+le résultat est `pixel<<15`, une coordonnée hors champ que `detect_brique` rejette toujours —
+le sous-pas 0 ne teste jamais rien. Le code était fidèle, la justification inventée.
+
+### Ce que la double passe a validé
+
+`asm_random.c` est ressorti **irréprochable** : transcription bit-exacte, et ses statistiques
+« mesurées » (période 4811, queue 2603, index 9 à +23,4 %) reproduites par simulation
+indépendante. Idem pour les 24 entrées de la table d'options, les 120 citations
+`Blaster.inc` de `constants.h` (100 % justes), la table de rebond à 16 cas, tout le pipeline
+`detect_prise_option`, `inc_score`/`dec_score`, le format `.scr` et son codec XOR, et les
+29 sites `play_sound` — tous exacts.
+
+### Leçon de méthode
+
+`grep` renvoie **silencieusement zéro résultat** sur ces fichiers ASM dans cet
+environnement. C'est ce qui m'avait fait écrire au §6 ter que `DELAI_INFO` n'était référencé
+nulle part : il l'est (MAIN.ASM:6305) et fixe la durée du bandeau à 100 frames. Toute
+recherche passe désormais par `awk` et une lecture directe.
 
 ## 7. Ce que cet audit n'a pas couvert
 
