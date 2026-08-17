@@ -164,7 +164,10 @@ static void t_duel_hold_fire_gives_it_away(void) {
     begin("duel: holding fire hands the option to the opponent (MAIN.ASM:5655-5670)");
     Game g; boot(&g, 2);
     FrameInput fi = idle_input();
-    fi.fire_pressed = 1;                 /* P1 collects while holding fire */
+    /* HELD, not pressed: read_click_player_1 is INT 33h AX=3, a button-state
+     * read (MOUSE.ASM:509-513). Asserting on the press edge would let an
+     * edge-triggered implementation pass, which is exactly what it used to do. */
+    fi.fire_held = 1;                    /* P1 collects while holding fire */
 
     put_powerup_on(&g, POWERUP_LARGE_SHIP, &g.paddle, 0);
     game_update(&g, &fi);
@@ -271,6 +274,78 @@ static void t_wall_bounce_keeps_position(void) {
     CHECK(b.x == x_before);              /* but not snapped onto the wall */
 }
 
+
+static void t_duel_counts_balls_per_player(void) {
+    begin("duel: a life is lost as soon as YOUR last ball drops (MAIN.ASM:4607-4610)");
+    Game g; boot(&g, 2);
+    FrameInput fi = idle_input();
+
+    /* P1 keeps a ball safely in flight; P2's only ball falls past the line. */
+    g.ball_count = 2;
+    g.balls[0].active = 1; g.balls[0].owner = 0;
+    g.balls[0].x = PLAY_X1 + 60; g.balls[0].y = 200;
+    g.balls[0].vx = 2; g.balls[0].vy = -3; g.balls[0].is_magnetic = 0;
+    g.balls[1].active = 1; g.balls[1].owner = 1;
+    g.balls[1].x = PLAY_X1 + 4;  g.balls[1].y = 460;
+    g.balls[1].vx = 0; g.balls[1].vy = 6;  g.balls[1].is_magnetic = 0;
+    g.paddle_2.x = PLAY_X2 - g.paddle_2.w - 4;   /* nowhere near it: a real miss */
+    int lives_1_before = g.lives, lives_2_before = g.lives_2;
+
+    game_update(&g, &fi);
+
+    /* nbs_ball_in_play is counted per player in duel, so P2 pays immediately
+     * instead of waiting for P1 to die too. */
+    CHECK(g.lives_2 == lives_2_before - 1);
+    CHECK(g.lives   == lives_1_before);
+}
+
+static void t_bonus_life_steps_by_the_cfg_value(void) {
+    begin("bonus life re-reads bonus_extra_life on every award (MAIN.ASM:6460-6461)");
+    Game g;
+    game_init(&g, NULL, NULL, DIFFICULTY_EASY, 0);
+    game_load_level(&g, 1);
+    int speed_start[3] = {2, 3, 4};
+    game_set_cfg_scalars(&g, 5, 1500, speed_start, 5000);   /* Extra_Life 5000 */
+    CHECK(g.bonus_life_threshold == 5000);
+
+    game_spawn_ball(&g);
+    g.state = STATE_PLAYING;
+    g.balls[0].is_magnetic = 0;
+
+    /* Collecting an option is worth +20 (MAIN.ASM:5710-5716), enough to cross
+     * the threshold. It must then move to 10 000, not to 15 000 — which is
+     * what stepping by the compiled BONUS_EXTRA_LIFE produced. */
+    FrameInput fi = idle_input();
+    g.score = 4995;
+    put_powerup_on(&g, POWERUP_SHOOT, &g.paddle, 0);
+    game_update(&g, &fi);
+    CHECK(g.score >= 5000);
+    CHECK(g.bonus_life_threshold == 10000);
+}
+
+static void t_life_lost_serves_both_players_again(void) {
+    begin("coop: both balls come back after a lost life (MAIN.ASM:1036-1045 start_game)");
+    Game g; boot(&g, 1);
+    FrameInput fi = idle_input();
+
+    only_one_ball(&g, 0);
+    g.balls[0].is_magnetic = 0;
+    g.balls[0].x  = PLAY_X1 + 4;
+    g.paddle.x    = PLAY_X2 - g.paddle.w - 4;
+    g.balls[0].y  = 460;
+    g.balls[0].vy = 6;
+    game_update(&g, &fi);
+    CHECK(g.state == STATE_READY_TO_PLAY_AGAIN);
+
+    /* Run the paddle explosion out. The deferred serve used to be pre-empted
+     * by a defensive one-ball respawn, so P2 never got a ball back. */
+    int i;
+    for (i = 0; i < PADDLE_EXPLO_TICKS + 2; i++) game_update(&g, &fi);
+    CHECK(g.ball_count == 2);
+    CHECK(g.balls[0].owner == 0);
+    CHECK(g.balls[1].owner == 1);
+}
+
 int main(void) {
     printf("BrickBlaster — instrumental parity tests\n\n");
 
@@ -286,6 +361,9 @@ int main(void) {
     t_one_fire_launches_both_balls();
     t_duel_ends_on_first_player_out();
     t_coop_pools_the_score();
+    t_duel_counts_balls_per_player();
+    t_bonus_life_steps_by_the_cfg_value();
+    t_life_lost_serves_both_players_again();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

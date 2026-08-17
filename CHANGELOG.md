@@ -19,6 +19,82 @@ _nothing yet_
 
 ---
 
+## [0.2.1] — 2026-08-17
+
+A review pass over the 0.2.0 parity work: four dimensions of cleanup review,
+two correctness reviews and an adversarial re-check of the ASM citations, all
+run against `MAIN.ASM` / `MOUSE.ASM` / `FILE.ASM` directly. Five rule
+divergences came out of it, each now pinned by a test — the suite went from 37
+to 46 assertions.
+
+### Fixed
+- **Duel counted balls globally instead of per player.** `nbs_ball_in_play` is
+  filtered by owner when `dual_flag` is on (`MAIN.ASM:4607-4610`), so a player
+  loses a life the moment *their* last ball drops. The port waited until every
+  ball on the board was dead, so the first player out kept sitting there
+  ball-less — and the no-double-KO rule then discarded the opponent's loss, so
+  it was never charged at all.
+- **Only one ball came back after a lost life in coop and duel.** A defensive
+  respawn fired the frame after `handle_life_lost`, hand-rolling a single ball
+  with no `owner` field, which made the real deferred serve think it had
+  already run. The recovery now waits for the paddle explosion and goes through
+  `game_spawn_ball`, which serves both players and tags both owners.
+- **The bonus-life threshold ignored `Extra_Life` from `blaster.cfg` after the
+  first award.** `MAIN.ASM:6460-6461` re-reads `bonus_extra_life` on every
+  award; the port seeded the first threshold from the cfg but then stepped by
+  the compiled 10 000, so `Extra_Life 5000` gave lives at 5 000 / 15 000 /
+  25 000 instead of every 5 000.
+- **The duel hold-fire easter egg tested a key press, not a held button.**
+  `read_click_player_1` is INT 33h AX=3 — a button-state read
+  (`MOUSE.ASM:509-513`). On an edge you had to press on the exact contact frame
+  for the option to go to your opponent, and tapping to release a magnetic ball
+  on that frame handed it over by accident. `FrameInput` now carries
+  `fire_held` / `p2_fire_held` alongside the launch edge.
+- **The ghost-burst paddle test was a pixel stricter than the bounce test.**
+  `MAIN.ASM:4174` is `jb @@end`, so contact starts at `ball.x + BALL_W >=
+  paddle.x`; the copy in the ghost path used `>`.
+- **`-DGIF_RECORDER=OFF` never linked on any platform.** The option dropped
+  `gif_recorder.c` from the target while `main.c` called into it
+  unconditionally — so the "100 %-vanilla build" the README documented could
+  not be produced. `gif_recorder.h` now provides inline no-op stubs.
+- **M and S did not resume from pause.** They were swallowed as audio toggles
+  for a pause-screen audio panel that 0.2.0 removed. `MAIN.ASM:1267` resumes on
+  any key.
+- Without a cfg, the powerup draw fell back to a path that still treated
+  frequency 0 as "no spawn" instead of re-drawing (`@@again`), and never
+  rejected `COLLISION` in solo. Both paths now share one loop.
+
+### Removed
+- Two forgotten UWP debug loggers (`D:\brickblaster-spawn.log`,
+  `D:\brickblaster-paddle.log`), both marked "remove once tracked down" and
+  both shipped in the 0.2.0 tag, along with the locals that only fed them.
+- `Paddle.laser_timer` / `size_timer` / `reverse_timer` — orphans of the
+  option-slot rework: written to 0 at four sites, ticked nowhere, read by
+  nothing. The three effects are derived from the option slot every frame.
+- `CREDITS_SLIDE_TIMEOUT` — dead constant whose comment invented a "5 seconds"
+  justification the cited ASM lines do not contain.
+
+### Documentation
+- README: the version prose claimed the latest tag was `v0.1.5` and the
+  `CMakeLists.txt` version `0.1.8`, both wrong; the fidelity warning still
+  pointed at an unmerged branch; the two April audit files were listed under
+  each other's titles; the reflet animation was on the to-do list and in the
+  shipped list thirteen lines apart; "80 levels" contradicted 0.2.0's own
+  finding that the campaign is 40 per world.
+- README license and credits wording now matches what `PROVENANCE.md`
+  establishes: the GPL v3 comes from the 2024 upstream repositories, not
+  "inherited from the original sources" (the 1999 sources carry no license),
+  and "entrusted" is replaced by upstream's actual sentence.
+- The two April 2026 audits carry a header banner and inline
+  **[SUPERSEDED]** / **[RETRACTED]** notes on the four verdicts the August
+  audit overturned — including P1-ASM-14, which accused the C code of
+  fabricating `MONSTER_DELAI_*` when `FILE.ASM:1130-1132` defines all three.
+- The August audit's closing section no longer repudiates its own later
+  passes (§6c did run the game; §6d did demonstrate the 60 Hz mapping).
+- `PROVENANCE.md`: dropped two asset paths that do not exist.
+
+---
+
 ## [0.2.0] — 2026-08-16
 
 A minor bump rather than a patch: this release changes how the game plays.
@@ -399,8 +475,12 @@ tagged, and `0.1.7` never existed.
 - Full C99 port of **BrickBlaster** (Media Pocket, 1999, Eclipse demomaker
   team) using raylib 5.0 for rendering / audio / input / windowing.
 - Windows x64 (MSVC), Linux x64 (GCC/Clang), macOS arm64, Android (NDK)
-  supported.
-- 80 original levels across 2 worlds (Space, Arcade), byte-compatible
+  supported. (An earlier version of this entry claimed Android was
+  supported outright — the Gradle project was a non-building scaffold
+  until the 0.2.0 work.)
+- 40 original levels per world across 2 worlds (Space, Arcade) — the
+  files hold 80 slots each, of which 40 are `0xFF` padding —
+  byte-compatible
   with the 1999 `.lv0` / `.lv1` / `.lv2` format.
 - 24 power-ups byte-identical to the ASM `struc_options` table
   (multi-ball, laser, magnetic, iron ball, ghost, night mode, teleporter,
@@ -417,9 +497,10 @@ tagged, and `0.1.7` never existed.
 - Level editor with 5 brick types and `F10` clipboard xchg (EDITOR.ASM).
 - Intro + victory FLC animations playing at the original 12 FPS cadence
   (FILE.ASM:98 / 164). (The *credits* animation is not part of 0.1.0 — it
-  arrives in 0.1.5, and ran at 18 FPS until the Unreleased fix above.)
+  arrives in 0.1.5, and ran at 18 FPS until the 0.2.0 fix above.)
 - Compile flags `TAKOHI_BRANDING` and `GIF_RECORDER` (both `ON` by
-  default, both can be turned off for a 100%-vanilla build).
+  default, both can be turned off for a 100%-vanilla build — though
+  `GIF_RECORDER=OFF` did not actually link until 0.2.1).
 - Three iterations of automated ASM-fidelity audits resulting in
   ~40 P0/P1 fixes documented in `audit-findings.md` and
   `audit-asm-faithful.md`.
@@ -429,7 +510,8 @@ tagged, and `0.1.7` never existed.
 ### Licence
 - GPL v3 — inherited from upstream david4599/BrickBlaster.
 
-[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...v0.2.0
 [0.1.6]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/KonsomeJona/brickblaster-c/compare/v0.1.4...v0.1.5

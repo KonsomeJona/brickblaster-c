@@ -32,10 +32,7 @@ void paddle_init(Paddle *p)
 
     p->reversed    = 0;
     p->has_gun     = 0;
-    p->laser_timer = 0;
     p->mini_laser  = 0;
-    p->size_timer  = 0;
-    p->reverse_timer = 0;
     p->gun_cooldown = 0;
     p->speed       = PADDLE_SPEED; /* MOUSE.ASM:77  speed_counter dd 6 */
     p->prev_x      = p->x;

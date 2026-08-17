@@ -138,9 +138,8 @@ the conversion mapping is one-to-one by filename):
 - `assets/final/frame_0001.png`…`frame_0418.png` — 418 frames extracted
   from `work400/Blaster/blaster.flc`.
 - `assets/title/media.png` ← `work400/Blaster/media.gif` (Media Pocket
-  splash); `assets/title/blaster.png`, `assets/title/menu.png`,
-  `assets/menu/blaster.png`, `assets/menu/menu.png` ← `Blaster.gif` /
-  `MENU.GIF`.
+  splash); `assets/menu/blaster.png`, `assets/menu/menu.png` ←
+  `Blaster.gif` / `MENU.GIF`.
 - `assets/blaster_icon.png` — 64×64 PNG of the original game icon (see
   `CHANGELOG.md`, entry on restoring the original icon).
 - `data/blaster.usr` — 2-byte volume file in the 1999 `FILE.ASM:813`

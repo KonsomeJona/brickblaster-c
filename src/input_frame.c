@@ -115,6 +115,7 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
 
     /* === Fire: keyboard + mouse + gamepad === */
     out->fire_pressed = IsKeyPressed(KEY_SPACE) || gamepad_confirm();
+    out->fire_held    = IsKeyDown(KEY_SPACE) || gamepad_confirm_down();
 
 #if defined(BRICKBLASTER_MOBILE)
     /* --- Mobile touch buttons --- */
@@ -184,6 +185,8 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
     /* Mouse click = fire only during gameplay. */
     if (in_game && out->click_pressed)
         out->fire_pressed = 1;
+    if (in_game && (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || touch_count > 0))
+        out->fire_held = 1;
 
     /* Pointer: touch first, then mouse/stylus position. */
     if (touch_count > 0) {
@@ -319,12 +322,13 @@ void input_wait_click_release(void) {
 void frame_input_poll_p2(FrameInput *out, int mode) {
     if (!out) return;
     out->p2_left = 0; out->p2_right = 0;
-    out->p2_stick_x = 0.0f; out->p2_fire = 0;
+    out->p2_stick_x = 0.0f; out->p2_fire = 0; out->p2_fire_held = 0;
 
     if (mode == 1) {          /* keyboard */
         out->p2_left  = IsKeyDown(KEY_Q) || IsKeyDown(KEY_A);
         out->p2_right = IsKeyDown(KEY_D);
-        out->p2_fire  = IsKeyPressed(KEY_F);
+        out->p2_fire      = IsKeyPressed(KEY_F);
+        out->p2_fire_held = IsKeyDown(KEY_F);
     } else if (mode == 2) {   /* joystick gamepad 1 */
         if (IsGamepadAvailable(1)) {
             out->p2_left  = IsGamepadButtonDown(1, GAMEPAD_BUTTON_LEFT_FACE_LEFT);
@@ -332,7 +336,8 @@ void frame_input_poll_p2(FrameInput *out, int mode) {
             float sx = GetGamepadAxisMovement(1, GAMEPAD_AXIS_LEFT_X);
             if (sx > -GAMEPAD_DEADZONE && sx < GAMEPAD_DEADZONE) sx = 0.0f;
             out->p2_stick_x = sx;
-            out->p2_fire = IsGamepadButtonPressed(1, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+            out->p2_fire      = IsGamepadButtonPressed(1, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+            out->p2_fire_held = IsGamepadButtonDown(1, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
         }
     }
     /* mode 0 = computer (AI), leave all zero here — main.c calls

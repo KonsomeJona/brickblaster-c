@@ -6,6 +6,12 @@
 **Commit audited**: `afbd060` (main branch, standalone repo)
 **ASM reference**: `/mnt/e/dev/BrickBlaster-archive/work400/Blaster/` (1999 MS-DOS original)
 
+> **Historical document, preserved as written.** Several verdicts below were
+> later overturned by [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md).
+> The overturned items carry an inline **[SUPERSEDED]** or **[RETRACTED]** note.
+> The ASM reference path quoted above has since moved to
+> `BrickBlaster/work400/Blaster/`. Read the August audit first.
+
 ## Severity scale
 - **P0** : Gameplay-affecting bug (score wrong, collision wrong, mode unplayable)
 - **P1** : Correctness deviation from ASM, game still playable
@@ -60,8 +66,8 @@
 - **C site**: `src/game.c:851` `game_over = p1_dead || p2_dead;`
 - **ASM ref**: MAIN.ASM:4595-4712
 - **Mode**: duel
-- **Description**: "First out ends match" — likely wrong. ASM disables losing paddle but keeps game until BOTH exhausted. Combined with P0-1 makes duel unplayable (first ball lost → both dead → game over).
-- **Fix**: Keep AND for duel; fix P0-1 first to decouple lives counters; verify ASM MAIN.ASM:4595-4712 reference.
+- **Description**: ~~"First out ends match" — likely wrong. ASM disables losing paddle but keeps game until BOTH exhausted.~~ **[SUPERSEDED — this diagnosis was wrong, and the wrong version got coded. MAIN.ASM:4674-4678 is `dec [ebp.player_nbs_ball] / cmp -1 / jne @@cont / mov game_mode,GAME_OVER` with no `dual_flag` test: the FIRST player out ends the match. See the August audit P0-5 and §5.]** Combined with P0-1 makes duel unplayable (first ball lost → both dead → game over).
+- **Fix**: ~~Keep AND for duel~~ **[do NOT — see above]**; fix P0-1 first to decouple lives counters; verify ASM MAIN.ASM:4595-4712 reference.
 - **Found by**: Batch A-F4, F-F2,F3
 
 ## P0-3 — Magnetic ball launch & tracking ignore P2 paddle
@@ -278,7 +284,7 @@ Summarized; see per-batch reports for detail.
 - **P3-1 — Score-award logic duplicated in 5 places** (projectile-brick, ball-brick, monster-ball, monster-projectile, transparent-brick). Batch A-F13. Extract helper `award_score(g, owner, delta)`.
 - **P3-2 — Collision LUT FACE_X/Y encoding undocumented**. Batch A-F14.
 - **P3-3 — `deactivate_current_option` conflict-clear redundant with switch**. Batch B-F8.
-- **P3-4 — POWERUP_DEATH is intentional no-op but still drops**. Batch B-F7. Remove from spawn pool or restore.
+- **P3-4 — POWERUP_DEATH is intentional no-op but still drops**. Batch B-F7. Remove from spawn pool or restore. **[Fixed since — `game.c` decrements the collector's life and plays DEATH.wav, as this same document's *Confirmed matches* section states.]**
 - **P3-5 — `dev_next_powerup` advances cycle on every call**. Batch B-F9.
 - **P3-6 — `hiscore_qualifies` off-by-one flagged twice (P0-10)**.
 - **P3-7 — TakoHi slide shown twice on non-Android** (screen_intro.c + screen_intro_original.c end). Batch D-F14.
@@ -301,7 +307,7 @@ From Explore-phase findings. Most promoted to P0 or P1 above.
 |---|---|---|
 | QW1 — Missing P2 AI | P0-12 | needs fix |
 | QW2 — Overlay case mismatch | P1-9 | needs fix |
-| QW3 — FLI frame count 418 vs 384 | resolved (Batch C-F11 confirmed 418 correct; update planning doc only) |
+| QW3 — FLI frame count 418 vs 384 | ~~resolved (Batch C-F11 confirmed 418 correct)~~ **[WRONG — overturned the next day by P1-ASM-27 and confirmed against `FILE.ASM:164` (`mov ecx,417-33`): the count is 384, which is what `screen_final.c` ships.]** |
 | QW4 — Menu 6 Editor vs Hiscore-Coop | P0-9 | needs fix |
 | QW5 — Transparent brick destroy | P0-8 | needs fix |
 | QW6 — P2 FIRE hint mobile | P2-4 | minor |

@@ -241,7 +241,8 @@ Dead i18n strings: `STR_READY`, `STR_GAME_PAUSED`, `STR_GAME_OVER`, `STR_DEMO_LA
 
 Three findings are April fixes that **enshrined an assumption that was never verified**:
 
-- The P0-5 fix (duel) carried the note "ASM disables losing paddle but keeps game until
+- The P0-5 fix (duel) — numbered **P0-2** in `audit-findings.md`, whose own P0-5 is a
+  different, scoring-related item — carried the note "ASM disables losing paddle but keeps game until
   BOTH exhausted — **verify**". The verification was never done; the opposite got coded.
 - `final_dual` was fixed **in the wrong place** (victory instead of game over).
 - `IRON BALL` was marked "to be decided" and then timed at 600 frames while the ASM makes
@@ -385,6 +386,8 @@ validated on its own, not done here.
 **Still open** (unchanged): single option slot per player, `Shade_On/Off` fades,
 automatic restart after game over, score table always displayed, lowercase high-score
 names, `final_text`/`final_dual` hardcoded in English, sound-settings screen not wired.
+*(All of these except the `Shade_On/Off` fades were closed in §6d the same day — the
+list above is what was true at the end of §6c, kept as written.)*
 
 ## 6d. Full-parity pass — August 16, 2026
 
@@ -617,8 +620,10 @@ search now goes through `awk` and a direct read.
 `Begin_Sprites` · `display_intro` fade durations (defined in the EOS lib, outside the repo) ·
 `EDITOR.ASM` and `HISCORE.ASM` visuals · GIF/LZW decoder · fidelity of the
 `.iff`/`.mod` → WAV audio conversion · tracker effects (`EFFECT.ASM`, `MIXING.ASM`) ·
-Android/Wear/mobile code · Android save paths · behavior at 70 Hz VGA vs 60 fps (the
-frame-for-frame equivalence adopted by the port was assumed, not demonstrated) ·
-**no finding was confirmed by running the game**: every verdict comes from cross-reading
-and from measurement on the data files. P0-4 (demo) would deserve a 30 s runtime
-confirmation.
+Android/Wear/mobile code · Android save paths · ~~behavior at 70 Hz VGA vs 60 fps (the
+frame-for-frame equivalence adopted by the port was assumed, not demonstrated)~~
+*(superseded — §6d demonstrated the 60 Hz WinEOS mapping from the MAKEFILE and
+`Wait_Vbl`; the "70 Hz VGA" premise of this line is itself wrong)* ·
+~~**no finding was confirmed by running the game**~~ *(superseded — §6c ran the port
+under WSLg and confirmed the demo and the palette findings on screen)*: the verdicts of
+this section come from cross-reading and from measurement on the data files.

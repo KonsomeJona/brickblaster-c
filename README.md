@@ -46,7 +46,7 @@ and Android (experimental — see [`android/README.md`](android/README.md)).
 ## What is BrickBlaster?
 
 A polished Arkanoid-style brick breaker with:
-- **80 levels** across 2 worlds (Space, Arcade)
+- **40 levels per world**, 2 worlds (Space, Arcade)
 - **24 power-ups** (multi-ball, iron ball, laser, magnetic paddle, ghost, teleporters, bonus/malus, …)
 - **Monsters** that spawn periodically and must be dodged or destroyed
 - **2-player** coop and versus (duel) modes
@@ -74,14 +74,15 @@ current state of play:
 - Timing constants (`DELAI_OPTION`, `DELAI_DEMO`, bonus life threshold,
   etc.)
 
-⚠️ These claims describe the current `fix/asm-parity-2026-08` branch. The
+⚠️ These claims describe `v0.2.0` and later. The
 August 2026 audit found 8 major divergences in exactly these areas, and a
 follow-up pass found two more that changed how the game plays and looks:
 ball speed-ups ran 3x too slow (the port compensated a frame rate the
 shipped 1999 binary never had), and the world 1 backgrounds were converted
 through the wrong palette, so 858 718 pixels per screen were wrong and a
-dark veil had been added to hide them. **Releases up to v0.1.6 predate all
-of this** and do not have the parity their README claims.
+dark veil had been added to hide them. **Releases up to v0.1.5 predate all
+of this** and do not have the parity their bundled README claims; `v0.2.0`
+is the first release that carries the full parity pass.
 
 Where the material comes from, and what the sources actually say about
 licensing — including the questions still unanswered upstream:
@@ -91,15 +92,21 @@ Per-iteration audit trail with ASM line citations, newest first:
 - [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md) — full ASM ↔ C
   parity audit (August 2026): the 8 P0 divergences, the P1/P2 tail, and
   §6 quater, the pass that closed everything else
-- [audit-findings.md](audit-findings.md) — *ASM 100% Fidelity Audit (Iter 1)*,
-  April 2026
-- [audit-asm-faithful.md](audit-asm-faithful.md) — *Audit Findings*, April 2026
+- [audit-findings.md](audit-findings.md) — *Audit Findings*, April 2026
+- [audit-asm-faithful.md](audit-asm-faithful.md) — *ASM 100% Fidelity Audit
+  (Iter 1)*, April 2026
+
+  ⚠️ Both April files are historical. Several of their verdicts were later
+  overturned by the August audit — the duel game-over rule, the
+  `MONSTER_DELAI` "fabrication" claim, the final-FLC frame count and the
+  magnetic-catch semantics. Each is marked inline in the file itself.
 
 ## Polish checklist vs the 1999 original
 
-Items on the next-iterations list, mostly UI and a few gameplay
-edges. Contributions and bug reports from people who know the 1999
-binary are genuinely useful — open an issue or a PR.
+Everything below has shipped; the section is kept as a record of what
+diverged from the 1999 binary and when it was closed. Contributions and bug
+reports from people who know that binary are genuinely useful — open an
+issue or a PR.
 
 **Done (shipped in post-v0.1.4 commits):**
 - ✅ **Iron ball**: passes through indestructible bricks and renders
@@ -113,8 +120,7 @@ binary are genuinely useful — open an issue or a PR.
 - ✅ **Power-up hitbox**: 26×24 (was inflated to 52×48 — leftover from
   the Wear OS 2x draw path). ASM-exact containment check.
 - ✅ **Unbreakable bricks flicker**: removed the ambient frame-toggle
-  that pulsed every incassable brick in sync. Hit-triggered reflet
-  animation per-brick still on the list for later.
+  that pulsed every incassable brick in sync.
 - ✅ **ESC binding**: ESC toggles pause from gameplay and exits to the
   main menu from the pause screen (desktop UX; `P` / click / gamepad
   still resume as before).
@@ -190,6 +196,7 @@ settings do not persist.
 |---|---|---|
 | `-DTAKOHI_BRANDING=OFF` | `ON` | Strip TakoHi publisher splash at end of intro |
 | `-DGIF_RECORDER=OFF` | `ON` | Remove F12 GIF capture (reduces binary) |
+| `-DBUILD_TESTS=ON` | `OFF` | Build `bb_tests`, the headless parity suite |
 
 For a 100%-vanilla build matching the 1999 release exactly:
 ```bash
@@ -204,10 +211,12 @@ cmake -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DTAKOHI_BRANDING=OFF -DGIF_RE
 | Fire ball | Space | A (Cross) | Tap |
 | Pause | P / Esc | Start | On-screen pause button |
 | Back | Esc | B (Circle) | On-screen button |
-| Toggle music / SFX | M / S (while paused) | — | — |
+| Music / SFX volume | drag the menu VU meter | — | drag |
 | Screenshot GIF | F12 | — | — |
 
-**2-player keyboard** — P1 arrows (or A/D) + Space, P2 Q/A/D + F.
+**2-player keyboard** — P1 arrows + Space, P2 Q/A (left) D (right) + F.
+A/D also move P1 in solo, but not while P2 is on the keyboard — A is P2's
+left there (`src/input_frame.c:98`).
 **2-player gamepad** — P1 on gamepad 0, P2 on gamepad 1.
 
 ## Project structure
@@ -264,7 +273,7 @@ section 5, the following prominent modifications were made in 2026:
 
 No gameplay constant, scoring rule, power-up table, level layout, or
 string is intentionally altered — the 24 power-ups match `struc_options`
-byte-for-byte and the 80 levels load unchanged from `.lv0` / `.lv1` /
+byte-for-byte and the levels load unchanged from `.lv0` / `.lv1` /
 `.lv2`. A few visible behaviours still diverge while the polish pass
 is in progress (see [checklist](#polish-checklist-vs-the-1999-original));
 deliberate deviations are tracked in
@@ -282,8 +291,10 @@ Developed by [Carapace (Softplace)](https://www.abandonware-france.org/compagnie
 published by [Media Pocket](https://www.abandonware-france.org/compagnies/media-pocket-1019/).
 
 **Source preservation & upstream archive (2024):**
-In early 2024, **Marc Radermacher** entrusted the original source tree
-to [david4599](https://github.com/david4599), who published it on GitHub
+In early 2024, **Marc Radermacher** provided the original source tree
+to [david4599](https://github.com/david4599) — upstream's wording is
+"kindly providing the source code of this awesome game and allowing to
+preserve it" — who published it on GitHub
 as two repositories:
 - [BrickBlaster](https://github.com/david4599/BrickBlaster) — the
   working source tree with a ready-to-use `build.bat` (Watcom 11.0B +
@@ -307,8 +318,10 @@ for kindly allowing the original sources to be preserved and to
 
 ## License
 
-**GNU General Public License v3.0** — inherited from the original
-BrickBlaster sources. See [LICENSE](LICENSE).
+**GNU General Public License v3.0** — as published with the upstream
+`david4599/BrickBlaster` repositories in 2024. The 1999 sources carry no
+license text of their own; what is and is not established about that chain
+is written up in [PROVENANCE.md](PROVENANCE.md). See [LICENSE](LICENSE).
 
 This program comes with **ABSOLUTELY NO WARRANTY**. This is free
 software, and you are welcome to redistribute it under the conditions
@@ -317,8 +330,9 @@ of the GPL v3.
 ## Release notes
 
 Release history lives in [CHANGELOG.md](CHANGELOG.md). The latest tag is
-`v0.1.5`; `0.1.6` has a changelog section but was never tagged, and the
-version in `CMakeLists.txt` is already `0.1.8`.
+`v0.2.0` (16 August 2026), which is also the version in `CMakeLists.txt`.
+`0.1.6` has a changelog section but was never tagged, and `0.1.7` never
+existed.
 
 **Release convention (by hand, not enforced):** a PR that bumps the
 version or pushes a `vX.Y.Z` tag should add or update the matching

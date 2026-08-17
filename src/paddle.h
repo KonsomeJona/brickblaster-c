@@ -59,17 +59,15 @@ typedef struct {
                          * (MAIN.ASM:2274-2316). */
     PaddleSize size;    /* NORMAL / SMALL / LARGE                         */
     int reversed;       /* direction reversed powerup (Option_reverse)    */
-    int has_gun;        /* shoot powerup active (mirrors laser_timer > 0) */
-    int laser_timer;    /* per-player POWERUP_SHOOT / MINI_SHOOT countdown.
-                         * ASM: count_tir_big_1/2, count_tir_left_1/2 etc.
-                         * MAIN.ASM:6525,6541,6570,6594 — per-player counters
-                         * for big/mini shoot. Fix for P2 collecting SHOOT
-                         * cancelling P1's active laser (and vice versa). */
-    int mini_laser;     /* 1 if laser_timer is MINI_SHOOT, 0 if big SHOOT */
-    int size_timer;     /* per-player SMALL_SHIP / LARGE_SHIP countdown.
-                         * MAIN.ASM:6491 option_small_ship_p, 6500 option_large_ship_p
-                         * — per-player so P2 collecting LARGE_SHIP enlarges P2 only. */
-    int reverse_timer;  /* per-player REVERSE countdown. MAIN.ASM:6562 option_reverse_p. */
+    /* has_gun / size / reversed are DERIVED every frame from the player's
+     * carried option slot by sync_paddle_from_option — the ASM re-reads
+     * current_option the same way (detect_shoot, detect_small_cursor…), so
+     * there are no per-effect countdowns to keep. The three timers that used
+     * to live here (laser_timer, size_timer, reverse_timer) were left behind
+     * by that rework: written to 0 at four sites, ticked nowhere, read by
+     * nothing. */
+    int has_gun;        /* shoot powerup active                            */
+    int mini_laser;     /* 1 if the active shoot option is MINI, 0 if big  */
     int gun_cooldown;   /* frames until next shot allowed                 */
     int gun_side;       /* 0=left, 1=right — alternates per shot (MAIN.ASM:1984) */
     int speed;          /* pixels per frame — MOUSE.ASM:77  speed_counter=6 */

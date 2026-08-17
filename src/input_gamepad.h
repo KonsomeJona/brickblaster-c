@@ -59,6 +59,13 @@ static inline int gamepad_confirm(void) {
     return IsGamepadButtonPressed(GP, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 }
 
+/* Same button, current state rather than the press edge — the ASM's
+ * read_click reads INT 33h AX=3 (button status). */
+static inline int gamepad_confirm_down(void) {
+    if (!IsGamepadAvailable(GP)) return 0;
+    return IsGamepadButtonDown(GP, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+}
+
 /* B button (Xbox) / Circle (PlayStation) — back / cancel */
 static inline int gamepad_back(void) {
     if (!IsGamepadAvailable(GP)) return 0;

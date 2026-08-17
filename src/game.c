@@ -25,29 +25,6 @@
 
 #include "raylib.h"    /* TraceLog */
 
-/* --------------------------------------------------------------------------
- * Ball-spawn diagnostic log
- *
- * Writes one line per ball-spawn site to D:\brickblaster-spawn.log on
- * Windows, so we can correlate "extra ball on paddle rebound" sightings
- * with the actual spawn reason (powerup collection, ghost, demo respawn,
- * defensive re-init). Compiled into UWP builds only.
- *
- * Remove or wrap in another flag once the bug is identified.
- * -------------------------------------------------------------------------- */
-#if defined(UWP_BUILD)
-#define SPAWN_LOG(g, fmt, ...) do {                                          \
-    FILE *_f = fopen("D:\\brickblaster-spawn.log", "a");                     \
-    if (_f) {                                                                \
-        fprintf(_f, "[f=%d gstate=%d bc=%d] " fmt "\n",                      \
-                (g)->frame, (g)->state, (g)->ball_count, ##__VA_ARGS__);     \
-        fclose(_f);                                                          \
-    }                                                                        \
-} while (0)
-#else
-#define SPAWN_LOG(g, fmt, ...) ((void)0)
-#endif
-
 /* Forward declarations for static helpers used before their definitions */
 static int compute_speed_level(const Game *g, int level_num);
 static PowerupType dev_next_powerup(Game *g);
@@ -176,7 +153,13 @@ static PowerupType pick_powerup_cfg(const Game *g) {
             break;
         }
     }
-    if (!has_override) return powerup_random_type(g->difficulty);
+    /* Without a cfg the frequencies come from the compiled table instead —
+     * but through this SAME loop. Delegating to powerup_random_type() here
+     * silently reverted two fixes for that path: it treats freq==0 as "no
+     * spawn" instead of re-drawing (@@again), and it never rejects COLLISION
+     * in solo, although its own header says the caller must. Only a harness
+     * that skips game_set_powerup_freq can reach it — tests/test_parity.c
+     * does exactly that. */
 
     /* @@again is a LOOP LABEL, not an exit: a frequency of 0 sends the code
      * back to the index draw (MAIN.ASM:5472 / 5508-5509 `cmp eax,Off / je
@@ -202,7 +185,13 @@ static PowerupType pick_powerup_cfg(const Game *g) {
         if (idx == POWERUP_COLLISION && g->game_mode == 0)
             return (PowerupType)POWERUP_COUNT;
 
-        freq = g->cfg_freq_option[idx][diff_idx];
+        if (has_override) {
+            freq = g->cfg_freq_option[idx][diff_idx];
+        } else {
+            const PowerupFreq *f = &powerup_freq_table[idx];
+            freq = (diff_idx == 0) ? f->easy : (diff_idx == 2) ? f->hard
+                                                               : f->medium;
+        }
         if (freq != 0) break;      /* MAIN.ASM:5508-5509 */
     }
     if (freq <= 0) return (PowerupType)POWERUP_COUNT;   /* cap hit */
@@ -379,6 +368,17 @@ static int speed_delai_of(const Game *g) {
     return (g && g->cfg_speed_delai > 0) ? g->cfg_speed_delai : SPEED_DELAI;
 }
 
+/* MAIN.ASM:6460-6461  `mov eax,bonus_extra_life / add player_bonus_life,eax`
+ * re-reads the runtime value on every award, so a cfg Extra_Life other than
+ * the compiled 10 000 must step by that same value. The port seeded the FIRST
+ * threshold from the cfg (line 532) but stepped by the compiled constant, so
+ * `Extra_Life 5000` gave lives at 5 000 / 15 000 / 25 000 instead of every
+ * 5 000. */
+static int bonus_extra_life_of(const Game *g) {
+    return (g && g->cfg_bonus_extra_life > 0) ? g->cfg_bonus_extra_life
+                                              : BONUS_EXTRA_LIFE;
+}
+
 static int compute_speed_level(const Game *g, int level_num) {
     int sl = speed_delai_of(g) - (level_num - 1) * 17;
     if (sl < 1) sl = 1;   /* clamp to at least 1 frame */
@@ -476,7 +476,7 @@ static void inc_score_raw(Game *g, int owner, int ecx, int recurse_bonus_life) {
 
         /* MAIN.ASM:6451-6472 detect_new_life — bonus life trigger */
         if (recurse_bonus_life && *target_score >= *target_thr) {
-            *target_thr += BONUS_EXTRA_LIFE;                /* MAIN.ASM:6460-6461 */
+            *target_thr += bonus_extra_life_of(g);          /* MAIN.ASM:6460-6461 */
             (*target_lives)++;                              /* MAIN.ASM:6436 option_new_life_p */
             if (*target_lives > BALL_MAX) *target_lives = BALL_MAX;
             if (g->audio) audio_play(g->audio, SFX_NEW_LIFE);  /* MAIN.ASM:6429 */
@@ -547,8 +547,8 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
     /* Active powerup state — all off */
     g->magnetic_flag      = 0;  /* P1-ASM-12: per-player bitmask, MAIN.ASM:3316 */
     g->iron_active        = 0;
-    /* laser / reverse / size state now per-paddle (Paddle.laser_timer,
-     * reverse_timer, size_timer) — initialised by paddle_init below. */
+    /* laser / reverse / size are per-paddle and derived from the option slot
+     * every frame (sync_paddle_from_option) — paddle_init clears the rest. */
     g->night_active       = 0;
     g->ghost_active       = 0;
     g->current_option_count = 0;
@@ -640,17 +640,11 @@ void game_load_level(Game *g, int level_num) {
     for (i = 0; i < g->ball_count; i++) g->balls[i].is_iron = 0;
     /* Per-paddle laser / size / reverse state — not tied to current_option. */
     g->paddle.has_gun        = 0;
-    g->paddle.laser_timer    = 0;
     g->paddle.mini_laser     = 0;
-    g->paddle.size_timer     = 0;
-    g->paddle.reverse_timer  = 0;
     g->paddle.reversed       = 0;
     paddle_set_size(&g->paddle, PADDLE_SIZE_NORMAL);
     g->paddle_2.has_gun      = 0;
-    g->paddle_2.laser_timer  = 0;
     g->paddle_2.mini_laser   = 0;
-    g->paddle_2.size_timer   = 0;
-    g->paddle_2.reverse_timer = 0;
     g->paddle_2.reversed     = 0;
     paddle_set_size(&g->paddle_2, PADDLE_SIZE_NORMAL);
 
@@ -750,8 +744,6 @@ void game_spawn_ball(Game *g) {
             g->balls[1].is_magnetic = 0;
         }
     }
-    SPAWN_LOG(g, "game_spawn_ball: level=%d game_mode=%d -> bc=%d",
-              g->level_num, g->game_mode, g->ball_count);
 
     /* Bug #5: Do NOT set g->state here.  Callers set the appropriate state:
      *   - STATE_READY_TO_PLAY      for first spawn (game_init / level advance)
@@ -985,21 +977,16 @@ static void create_ball_asm(Game *g, Ball *b, const Paddle *p, int owner) {
 
 static void spawn_extra_balls(Game *g, int count, int owner) {
     Paddle *owner_paddle = (g->game_mode > 0 && owner == 1) ? &g->paddle_2 : &g->paddle;
-    int _bc_before = g->ball_count;
-
     /* Iter 2 fix #8: MAIN.ASM:1567-1583 add_ball reuses inactive slots FIRST,
      * only appending to the end when no gap is available. Scan [0, ball_count)
      * for inactive slots, then fall through to appending. */
     int spawned = 0;
-    int reused = 0;
-    int appended = 0;
 
     /* Pass 1: reuse gaps */
     for (int slot = 0; slot < g->ball_count && spawned < count; slot++) {
         if (g->balls[slot].active) continue;
         create_ball_asm(g, &g->balls[slot], owner_paddle, owner);
         spawned++;
-        reused++;
     }
 
     /* Pass 2: append until count reached or array is full */
@@ -1008,10 +995,7 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
         create_ball_asm(g, &g->balls[g->ball_count], owner_paddle, owner);
         g->ball_count++;
         spawned++;
-        appended++;
     }
-    SPAWN_LOG(g, "spawn_extra: requested=%d owner=%d reused=%d appended=%d lost=%d bc %d->%d",
-              count, owner, reused, appended, (count - spawned), _bc_before, g->ball_count);
 }
 
 /* --------------------------------------------------------------------------
@@ -1479,6 +1463,30 @@ static void tick_option_timer(Game *g) {
 }
 
 /* --------------------------------------------------------------------------
+ * Internal: nbs_ball_in_play for one player.
+ * MAIN.ASM:4601-4622  detect_game_over_player_1's sprite loop:
+ *     cmp dual_flag,On / jne @@ok            ; solo & coop count every ball
+ *     cmp [edx.sprite_player],ebp / jne @@next ; duel counts only this player's
+ *     cmp [edx.sprite_status],On  / je @@count_ball
+ *     cmp [edx.sprite_status],Kill/ je @@count_ball
+ * `player` is 0 for player_1, 1 for player_2 (MAIN.ASM:4640-4645 mirror).
+ * -------------------------------------------------------------------------- */
+static int count_balls_in_play(const Game *g, int player) {
+    int i, n = 0;
+    for (i = 0; i < g->ball_count; i++) {
+        if (!g->balls[i].active) continue;
+        /* PORT DEVIATION, attract mode only: a ghost ball can settle in the
+         * bottom strip outside the paddle's X range and trigger neither the
+         * on-paddle burst nor ball_lost for many frames, freezing the demo.
+         * Normal play counts ghosts as in play, like the ASM. */
+        if (g->demo_active && g->balls[i].is_ghost) continue;
+        if (g->game_mode == 2 && g->balls[i].owner != player) continue;
+        n++;
+    }
+    return n;
+}
+
+/* --------------------------------------------------------------------------
  * Internal: handle ball lost → lose a life (or game over).
  * MAIN.ASM:4595-4712  detect_game_over_player_1 / test_game_over
  *
@@ -1533,11 +1541,8 @@ static void handle_life_lost(Game *g) {
     for (i = 0; i < lost_n; i++) {
         Paddle *lp = lost_paddles[i];
         lp->has_gun        = 0;
-        lp->laser_timer    = 0;
         lp->mini_laser     = 0;
         lp->gun_cooldown   = 0;
-        lp->size_timer     = 0;
-        lp->reverse_timer  = 0;
         lp->reversed       = 0;
         paddle_set_size(lp, PADDLE_SIZE_NORMAL);
     }
@@ -1848,8 +1853,6 @@ static int projectile_hit_brick(Game *g, Projectile *p)
                 powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
                 /* F5 P1-ASM-35: tag with destroyer's owner (projectile path). */
                 g->powerups[g->powerup_count].owner = p->owner;
-                SPAWN_LOG(g, "powerup_spawn(proj): type=%d at x=%d y=%d (brick %d)",
-                          pt, bx, by, idx);
                 g->powerup_count++;
             }
         }
@@ -2236,14 +2239,18 @@ void game_update(Game *g, const FrameInput *input) {
      * Bug #5 fix: if balls[0] is not active during READY_TO_PLAY states,
      * reinitialise defensively so the ball always tracks the paddle. */
     if (g->state == STATE_READY_TO_PLAY || g->state == STATE_READY_TO_PLAY_AGAIN) {
-        if (g->ball_count < 1 || !g->balls[0].active) {
-            /* Defensive recovery — re-spawn ball on paddle */
-            int bx = g->paddle.x + g->paddle.w / 2 - BALL_W / 2;
-            int by = g->paddle.y - BALL_H;
-            ball_init(&g->balls[0], bx, by);
-            g->balls[0].is_magnetic = 1;
-            g->ball_count = 1;
-            SPAWN_LOG(g, "ready_reinit: defensive respawn slot 0");
+        /* handle_life_lost leaves ball_count at 0 and defers the real serve to
+         * the end of the paddle explosion (line 2067). This recovery used to
+         * fire on the very next frame and hand-roll a SINGLE ball with no
+         * owner field, so the deferred spawn then found ball_count == 1 and
+         * never ran: in coop and duel only one ball came back after every lost
+         * life, pinned to whichever paddle the stale owner pointed at. Wait
+         * for the explosion, and serve through game_spawn_ball so both players
+         * and both owner tags are set. */
+        int explo_pending = (g->paddle.explo_timer > 0 ||
+                             g->paddle_2.explo_timer > 0);
+        if (!explo_pending && (g->ball_count < 1 || !g->balls[0].active)) {
+            game_spawn_ball(g);
         }
         /* Pin each un-launched ball to ITS OWNER'S paddle (P1 → paddle,
          * P2 → paddle_2). Iter 2 fix #1: mirrors detect_start_game in
@@ -2510,7 +2517,7 @@ void game_update(Game *g, const FrameInput *input) {
             /* P1 paddle */
             if (test_p1
                 && by + BALL_H >= g->paddle.y
-                && bx + BALL_W > g->paddle.x
+                && bx + BALL_W >= g->paddle.x
                 && bx < g->paddle.x + g->paddle.w) {
                 ghost_burst = 1;
                 burst_owner = 0;
@@ -2518,7 +2525,7 @@ void game_update(Game *g, const FrameInput *input) {
             /* P2 paddle in coop/duel */
             if (!ghost_burst && test_p2
                 && by + BALL_H >= g->paddle_2.y
-                && bx + BALL_W > g->paddle_2.x
+                && bx + BALL_W >= g->paddle_2.x
                 && bx < g->paddle_2.x + g->paddle_2.w) {
                 ghost_burst = 1;
                 burst_owner = 1;
@@ -2740,8 +2747,6 @@ void game_update(Game *g, const FrameInput *input) {
                             powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
                             /* F5 P1-ASM-35: tag with destroyer's owner (ball path). */
                             g->powerups[g->powerup_count].owner = g->balls[i].owner;
-                            SPAWN_LOG(g, "powerup_spawn(ball): type=%d at x=%d y=%d (brick %d)",
-                                      pt, bx, by, hidx);
                             g->powerup_count++;
                         }
                     }
@@ -3014,9 +3019,15 @@ void game_update(Game *g, const FrameInput *input) {
          *     cmp eax,O player_1 / jne @@cont1
          *     call read_click_player_1 / jz @@cont2
          *     mov current_player,O player_2
-         * and symmetrically for player_2. */
+         * and symmetrically for player_2.
+         * read_click is INT 33h AX=3 (MOUSE.ASM:509-513) — the button's current
+         * state. The port tested the press EDGE instead, so the egg almost
+         * never fired (you had to press on the exact contact frame) and it
+         * misfired the other way when a tap released a magnetic ball on that
+         * same frame. */
         if (collected_by >= 0 && g->game_mode == 2) {
-            int holding = (collected_by == 1) ? input->p2_fire : fire_pressed;
+            int holding = (collected_by == 1) ? input->p2_fire_held
+                                              : input->fire_held;
             if (holding) collected_by ^= 1;
         }
 
@@ -3030,9 +3041,6 @@ void game_update(Game *g, const FrameInput *input) {
              * FONTE.ASM contains zero references to it, as do MOUSE.ASM and
              * HISCORE.ASM. The 1999 attract mode is a real game: it collects
              * powerups, applies them and scores. */
-            SPAWN_LOG(g, "powerup_collected: type=%d by=%d at x=%d y=%d",
-                      g->powerups[i].type, collected_by,
-                      g->powerups[i].x, g->powerups[i].y);
             apply_powerup(g, g->powerups[i].type, collected_by);
             /* MAIN.ASM:5710-5716 detect_prise_option: mov ecx,2; call inc_score
              * → +20 base, +difficulty bonus, x2 in night mode. */
@@ -3076,45 +3084,52 @@ void game_update(Game *g, const FrameInput *input) {
      *   We implement as: respawn ball at fixed demo velocity.
      * ======================================================================= */
     if (g->state == STATE_PLAYING) {
-        int active_count = 0;
-        any_alive = 0;
-        for (i = 0; i < g->ball_count; i++) {
-            if (!g->balls[i].active) continue;
-            /* Demo mode: ignore ghost/bubble balls when deciding whether
-             * any ball is still in play. A ghost ball can end up outside
-             * the paddle's X range in the bottom strip and fail to trigger
-             * either the on-paddle destruction or ball_lost for many
-             * frames, freezing the attract demo. Normal play still
-             * counts ghosts as alive. */
-            if (g->demo_active && g->balls[i].is_ghost) continue;
-            any_alive = 1;
-            active_count++;
+        /* MAIN.ASM:4623-4629  @@test_game_over, reached once the sprite loop
+         * has filled nbs_ball_in_play:
+         *     nbs_ball_in_play == 0                  -> test_game_over
+         *     nbs_ball_in_play >= 2                  -> @@end
+         *     nbs_ball_in_play == 1 && coop_flag=On  -> test_game_over
+         * The count itself is PER PLAYER in duel (count_balls_in_play mirrors
+         * MAIN.ASM:4607-4610) and over every ball otherwise.
+         *
+         * The port previously triggered only when EVERY ball was dead, which
+         * made duel wrong in both directions: the player whose last ball
+         * dropped kept playing ball-less until the opponent died too, and the
+         * no-double-KO rule at line 1502 then discarded the opponent's loss,
+         * so it was never charged at all. */
+        int in_play_p1 = count_balls_in_play(g, 0);
+        int trigger_life_lost = 0;
+        int trigger_p2 = 0;
+        any_alive = (in_play_p1 > 0);
+        if (g->ball_count > 0) {
+            if (in_play_p1 == 0) {
+                trigger_life_lost = 1;
+            } else if (in_play_p1 < 2 && g->game_mode == 1) {
+                trigger_life_lost = 1;      /* coop_flag branch, MAIN.ASM:4628 */
+            }
+            /* MAIN.ASM:1090  call detect_game_over_player_2 — its own counter,
+             * checked after P1's (which is why P1 wins a simultaneous KO). */
+            if (!trigger_life_lost && g->game_mode == 2) {
+                if (count_balls_in_play(g, 1) == 0) {
+                    trigger_life_lost = 1;
+                    trigger_p2 = 1;
+                    any_alive = 1;          /* P1 still has a ball in flight */
+                }
+            }
         }
-        /* P1-ASM-9: MAIN.ASM:4623-4629 detect_game_over_player_1
-         *   test_game_over fires when nbs_ball_in_play == 0, OR when
-         *   nbs_ball_in_play < 2 AND coop_flag=On. Coop pool loses a life
-         *   whenever in-play drops below 2 (including to 1). */
-        int trigger_life_lost =
-            (!any_alive && g->ball_count > 0)
-            || (g->game_mode == 1 && g->ball_count > 0 && active_count < 2
-                && (g->p1_ball_lost_pending || g->p2_ball_lost_pending));
         if (trigger_life_lost) {
             if (g->demo_active) {
-                /* DEBUG: dump every active/inactive ball before respawn so we
-                 * can see why any_alive=0 (fires repeatedly in demo). */
-                SPAWN_LOG(g, "trigger_life_lost: bc=%d active=%d", g->ball_count, active_count);
-                for (int _bi = 0; _bi < g->ball_count; _bi++) {
-                    SPAWN_LOG(g, "  ball[%d]: active=%d ghost=%d magn=%d x=%d y=%d vx=%d vy=%d",
-                              _bi, g->balls[_bi].active, g->balls[_bi].is_ghost,
-                              g->balls[_bi].is_magnetic, g->balls[_bi].x, g->balls[_bi].y,
-                              g->balls[_bi].vx, g->balls[_bi].vy);
-                }
                 /* Demo: respawn immediately — no life lost.
                  * MAIN.ASM:2761-2771  @@demo ball init (fixed velocity). */
                 demo_handle_ball_lost(g);
-                SPAWN_LOG(g, "demo_handle_ball_lost: respawned slot 0 padx=%d pady=%d",
-                          g->paddle.x, g->paddle.y);
             } else {
+                /* Whichever counter hit zero decides who pays, exactly as the
+                 * ASM's two detect_game_over_player_N entry points do. A ghost
+                 * bursting on the paddle (active=0, no ball_lost) sets no
+                 * pending flag, so without this the loss fell to the fallback
+                 * at line 1506 and could be charged to the wrong player. */
+                if (trigger_p2) g->p2_ball_lost_pending = 1;
+                else            g->p1_ball_lost_pending = 1;
                 /* Normal play: MAIN.ASM:4595-4712  test_game_over */
                 handle_life_lost(g);
             }

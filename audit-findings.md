@@ -4,6 +4,12 @@
 **Rule**: HARD — nothing that isn't in the 1999 DOS ASM (`/mnt/e/dev/BrickBlaster-archive/work400/Blaster/`).
 **Commit audited**: `c6b4e59` (after rollback of modern additions).
 
+> **Historical document, preserved as written.** Several verdicts below were
+> later overturned by [audit-2026-08-13-parity.md](audit-2026-08-13-parity.md).
+> The overturned items carry an inline **[SUPERSEDED]** or **[RETRACTED]** note.
+> The ASM reference path quoted above has since moved to
+> `BrickBlaster/work400/Blaster/`. Read the August audit first.
+
 ## Scope
 
 6 parallel agents, each covering an ASM file cluster:
@@ -61,10 +67,10 @@
 - **P1-ASM-8**: `detect_new_life` missing +80 pts score bonus. ASM `MAIN.ASM:6463-6472` adds 8×inc_score when crossing `bonus_extra_life=10000`. C only increments lives.
 - **P1-ASM-9**: Coop life-lost trigger. ASM `MAIN.ASM:4626-4629` fires `test_game_over` when in-play ball count drops to 1. C waits for 0.
 - **P1-ASM-10**: REVERSE doesn't occupy global `current_option`. ASM `MAIN.ASM:5700-5714 detect_prise_option` writes it. C only sets `paddle.reverse_timer`.
-- **P1-ASM-11**: Magnetic catch zeros velocity. ASM `MAIN.ASM:4207-4221` preserves vx/vy, flips sens_y only. C `src/collision.c:555-561` zeros and recomputes on launch.
+- **P1-ASM-11**: Magnetic catch zeros velocity. ASM `MAIN.ASM:4207-4221` preserves vx/vy, flips sens_y only. **[INCOMPLETE — the ASM also applies the per-zone angle adjustment (`inc_angle_x`/`dec_angle_x`, MAIN.ASM:4223-4241); see the August audit §6d.]** C `src/collision.c:555-561` zeros and recomputes on launch.
 - **P1-ASM-12**: MAGNETIC / GHOST per-player in ASM (via `magnetic_flag` bits PLAYER_ONE=1, PLAYER_TWO=2 at Blaster.inc:13-14; `set_ghost` filtered by current_player MAIN.ASM:3339-3358). C uses global flags.
 - **P1-ASM-13**: TELEPOD 600-frame window in C vs ASM one-shot (Refresh_Ball `@@reset_current_option` MAIN.ASM:2885-2898).
-- **P1-ASM-14**: `MONSTER_DELAI_*` (600/500/300) fabricated — ASM symbols never defined. Citation `FILE.ASM:1130-1132` is wrong (those lines are `delai_between_option_easy`, unrelated).
+- **P1-ASM-14**: ~~`MONSTER_DELAI_*` (600/500/300) fabricated — ASM symbols never defined. Citation `FILE.ASM:1130-1132` is wrong (those lines are `delai_between_option_easy`, unrelated).~~ **[RETRACTED — FILE.ASM:1130-1132 does define `monster_delai_easy` / `_medium` / `_hard` as 600/500/300. The C citation was right; this finding came from the silent-`grep` failure documented in the August audit §6e.]**
 
 ## Menu / demo / UI (F2)
 
@@ -78,7 +84,7 @@
 - **P1-ASM-19**: Digits 0-9 silently rejected in name entry. ASM `Get_name` accepts all `al >= 0x20`. C `screen_hiscore.c:117-122` only A-Z/a-z/space.
 - **P1-ASM-20**: No BACKSPACE in name entry. ASM `ah=14` writes space+decrements edi.
 - **P1-ASM-21**: `final_text` / `final_dual` victory modal screens missing (TODOs in `screen_final.c:53,66`).
-- **P1-ASM-22**: Duel skips final FLC entirely in C. ASM `HISCORE.ASM:26` plays `load_final_anim` unconditionally BEFORE `dual_flag` check.
+- **P1-ASM-22**: Duel skips final FLC entirely in C. ASM `HISCORE.ASM:26` plays `load_final_anim` unconditionally BEFORE `dual_flag` check. **[Confirmed by the August audit §6d — duel DOES play the animation; only the post-animation text/hiscore path branches on `dual_flag`.]**
 - **P1-ASM-23**: `Read_File_Config` cfg parser NOT ported. All values hardcoded. User cannot edit Blaster.cfg to tune powerup delays, lives, speeds.
 - **P1-ASM-24**: `.usr` user config (volume) NOT ported. ASM `Read/Write_Config_User` persists `User_Volume` + `User_Volume_Sfx` — this IS in ASM, so should be ported per rule.
 - **P1-ASM-25**: Editor missing teleporter + multi brick types (ASM F1-F5 has all 5; C only has Normal/Indestr/Transparent keys).

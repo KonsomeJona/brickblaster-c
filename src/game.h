@@ -232,14 +232,12 @@ typedef struct {
      * P1-ASM-12 fix: per-player magnetic state. */
     int          magnetic_flag;        /* POWERUP_MAGNETIC per-player bitmask */
     int          iron_active;          /* POWERUP_IRON_BALL — ball destroys bricks without bouncing */
-    /* NOTE: laser state is per-paddle (Paddle.laser_timer / mini_laser).
-     * The SHOOT/MINI_SHOOT powerups do not occupy current_option — they run
-     * independently on each paddle so one player collecting a laser does
-     * not cancel the other's active laser. Fix for P2-cancels-P1 bug.
-     * Per ASM MAIN.ASM:6509-6603 (option_shoot_p / option_mini_shoot_p):
-     *   separate counters count_tir_big_1/_2 and count_tir_left_1/_2.
-     * REVERSE / SMALL_SHIP / LARGE_SHIP are also per-paddle
-     * (Paddle.reverse_timer / size_timer) — no global game flag needed. */
+    /* NOTE: laser state is per-paddle (Paddle.has_gun / mini_laser), and so
+     * are REVERSE / SMALL_SHIP / LARGE_SHIP (Paddle.reversed / size) — no
+     * global game flag for any of them. All four are re-derived from the
+     * player's option slot every frame by sync_paddle_from_option, the way
+     * MAIN.ASM:6509-6603 (option_shoot_p / option_mini_shoot_p) keeps
+     * count_tir_big_1/_2 and count_tir_left_1/_2 separate per player. */
     int          night_active;         /* POWERUP_NIGHT     — score doubled */
     int          ghost_active;         /* POWERUP_GHOST     — ball passes walls */
     int          current_option_count; /* countdown timer for active timed powerup (DELAI_OPTION=600) */

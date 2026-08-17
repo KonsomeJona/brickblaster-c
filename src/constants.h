@@ -158,7 +158,6 @@
 #define PADDLE_SPEED      6     // MOUSE.ASM:77  speed_counter dd 6
 
 // Credits screen timing
-#define CREDITS_SLIDE_TIMEOUT 300  // MAIN.ASM:154,163,172,181,190 - 5 seconds @ 60 FPS
 
 // ============================================================================
 // SPRITE ANIMATION

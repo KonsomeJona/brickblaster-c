@@ -23,6 +23,13 @@ typedef struct {
     /* Fire (edge-triggered) */
     int   fire_pressed;     /* 1 = fire/launch was pressed this frame */
 
+    /* Fire (level-triggered). read_click_player_1/2 (MOUSE.ASM:509-513) is
+     * INT 33h AX=3 — "get button status", i.e. the button's CURRENT state, not
+     * a press event. The duel option-transfer easter egg (MAIN.ASM:5655-5670)
+     * tests that state, so it needs the held flag, while launching a ball
+     * needs the edge above. */
+    int   fire_held;        /* 1 = fire is held down right now */
+
     /* Click (edge-triggered) — centralised mouse/touch click for menus */
     int   click_pressed;    /* 1 = left mouse button pressed this frame */
 
@@ -46,7 +53,8 @@ typedef struct {
     int   p2_left;          /* ZQSD Q or gamepad1 left */
     int   p2_right;         /* ZQSD D or gamepad1 right */
     float p2_stick_x;       /* gamepad1 stick */
-    int   p2_fire;          /* F key or gamepad1 A */
+    int   p2_fire;          /* F key or gamepad1 A (edge) */
+    int   p2_fire_held;     /* same button, current state — see fire_held */
 } FrameInput;
 
 /* On-screen pause button — canvas coordinates (640x480), top-right margin

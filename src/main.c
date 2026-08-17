@@ -298,26 +298,6 @@ static void UpdateDrawFrame(void) {
                          state.button_speed, state.tilt_speed,
                          0, in_game, p2_keyboard);
 
-#if defined(UWP_BUILD)
-        /* DIAGNOSTIC: every 60 frames during PLAYING, dump input + paddle
-         * state so the "paddle freezes after ~5 min" bug can be diagnosed.
-         * Remove once tracked down. */
-        if (game_initialized && state.game_mode == STATE_PLAYING
-            && (game.frame % 60) == 0) {
-            FILE *_pd = fopen("D:\\brickblaster-paddle.log", "a");
-            if (_pd) {
-                fprintf(_pd,
-                    "f=%d s=%d demo=%d padx=%d ptract=%d ptrx=%.1f "
-                    "mL=%d mR=%d stk=%.2f rev=%d sz_tmr=%d demo_tmr=%d\n",
-                    game.frame, game.state, game.demo_active,
-                    game.paddle.x, fi.pointer_active, (double)fi.pointer_game_x,
-                    fi.move_left, fi.move_right, (double)fi.stick_x,
-                    game.paddle.reversed, game.paddle.size_timer,
-                    game.demo_timer);
-                fclose(_pd);
-            }
-        }
-#endif
         /* Poll P2 input when multiplayer active. */
         if (state.nbs_player > 1) {
             frame_input_poll_p2(&fi, state.control_p2);
@@ -655,16 +635,17 @@ static void UpdateDrawFrame(void) {
             break;
         }
 
-        /* M / S are consumed by pause_handle_input as audio toggles and
-         * must NOT trigger resume — swallow those events before the
-         * generic "any key resumes" check. */
-        int audio_toggle_frame = IsKeyPressed(KEY_M) || IsKeyPressed(KEY_S);
+        /* MAIN.ASM:1265-1272  @@wait: `cmp B [ebp+all],Off / jne @@ok` — ANY
+         * key leaves the pause. M and S used to be swallowed here because the
+         * pause screen carried an audio panel; 0.2.0 removed that panel (it
+         * never existed in 1999), so swallowing them only made two keys
+         * mysteriously fail to resume. */
 
         if (pause_cooldown > 0) {
             pause_cooldown--;
         } else if (resume_pressed == 1 ||
                    (resume_pressed == 0 &&
-                    ((!audio_toggle_frame && GetKeyPressed() != 0) ||
+                    (GetKeyPressed() != 0 ||
                      fi.click_pressed ||
                      fi.pause_pressed ||
                      gamepad_confirm() || gamepad_back()))
