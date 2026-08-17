@@ -17,7 +17,7 @@
  * but main.c calls these four unconditionally, so without stubs the build
  * simply failed to link — the documented "vanilla" flag was unusable on every
  * platform. Inline no-ops keep the call sites free of #ifdef noise. */
-#if defined(GIF_RECORDER)
+#if defined(GIF_RECORDER) || defined(GIF_RECORDER_IMPL)
 
 void gif_recorder_toggle(void);
 void gif_recorder_capture(RenderTexture2D canvas);

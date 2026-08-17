@@ -28,6 +28,11 @@ add_compile_definitions(BRICKBLASTER_VERSION="${BB_VERSION}")
 
 # TakoHi publisher branding (same default as desktop).
 add_compile_definitions(TAKOHI_BRANDING=1)
+# This file list always includes gif_recorder.c, so declare it the way the root
+# CMakeLists does — gif_recorder.h serves inline no-op stubs when the macro is
+# absent, and compiling the real implementation against those stubs is a
+# redefinition error.
+add_compile_definitions(GIF_RECORDER=1)
 # Phone build: touch buttons + drag + accelerometer tilt (src/mobile_controls.c,
 # src/input_tilt.c). PLATFORM_ANDROID alone (without this) is the Wear OS mode.
 add_compile_definitions(BRICKBLASTER_MOBILE=1)

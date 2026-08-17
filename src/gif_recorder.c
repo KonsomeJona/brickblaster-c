@@ -3,6 +3,11 @@
  * Uses Charlie Tangora's gif.h (public domain).
  */
 
+/* Compiling this file at all means the recorder is in the build, whether or not
+ * the build system defined GIF_RECORDER — the Android CMakeLists did not, and
+ * the header's no-op stubs then collided with the definitions below. */
+#define GIF_RECORDER_IMPL 1
+
 #include "gif_recorder.h"
 #include "constants.h"
 #include <raylib.h>
