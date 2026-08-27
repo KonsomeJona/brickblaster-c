@@ -589,7 +589,14 @@ static void UpdateDrawFrame(void) {
 
         draw_frame_to_canvas(&dc, &game);
         BeginTextureMode(dc.canvas);
-        if (state.demo_flag) draw_demo_overlay();
+        /* MAIN.ASM:6997 prints option_text_demo as a one-shot blit; the next
+         * print (the pickup banner, MAIN.ASM:6274-6290) simply replaces it on
+         * screen. The port redraws the demo banner every frame at the same
+         * panel_info slot, and font_draw_string leaves spaces untouched, so the
+         * two 18-char strings interleave instead of one replacing the other
+         * ("large ship" over "demo" rendered as LARDEMBHIP). Let the pickup
+         * banner win for its lifetime, as the last print does in the ASM. */
+        if (state.demo_flag && game.pickup_text_timer <= 0) draw_demo_overlay();
 #if defined(BRICKBLASTER_MOBILE)
         /* Fire enabled only when ball is on paddle or gun is active */
         mobile_controls_draw("FIRE",
