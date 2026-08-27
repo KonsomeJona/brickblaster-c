@@ -9,7 +9,9 @@
 [![Build](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml/badge.svg)](https://github.com/KonsomeJona/brickblaster-c/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/KonsomeJona/brickblaster-c)](https://github.com/KonsomeJona/brickblaster-c/releases/latest)
 
-### ▶️ [**Play it in your browser — Jouer dans le navigateur**](https://konsomejona.github.io/brickblaster-c/) — no install, ~26 MB
+### ▶️ [**Play it on itch.io — Jouer sur itch.io**](https://konsomejona.itch.io/brickblaster) — in your browser, no install
+
+<sub>Mirror without the store page: [konsomejona.github.io/brickblaster-c](https://konsomejona.github.io/brickblaster-c/)</sub>
 
 ### ⬇️ [**Download the game here — Téléchargez le jeu ici**](https://github.com/KonsomeJona/brickblaster-c/releases/latest) — Windows / Linux / macOS
 
@@ -344,6 +346,7 @@ themselves are auto-generated from commits
 
 ## Links
 
+- Play in the browser + downloads: [itch.io page](https://konsomejona.itch.io/brickblaster)
 - C/raylib port binaries: [GitHub Releases](https://github.com/KonsomeJona/brickblaster-c/releases)
 - Upstream source + toolchain: [david4599/BrickBlaster](https://github.com/david4599/BrickBlaster)
 - Unmodified original + EOS archive: [david4599/BrickBlaster-EOS-Archive](https://github.com/david4599/BrickBlaster-EOS-Archive)

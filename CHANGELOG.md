@@ -19,6 +19,24 @@ _nothing yet_
 
 ---
 
+## [0.2.2] — 2026-08-27
+
+Cosmetic fix found while capturing footage for the itch.io page.
+
+### Fixed
+
+- **Demo banner overwrote the power-up pickup text.** `MAIN.ASM:6997` prints
+  `option_text_demo` as a one-shot blit, so the next print — the pickup banner
+  at `MAIN.ASM:6274-6290` — simply replaces it on screen. The port redrew the
+  demo banner every frame at the same `panel_info` slot, and `font_draw_string`
+  leaves spaces untouched, so the two 18-char strings interleaved instead of
+  one replacing the other: picking up `large ship` during the attract mode
+  rendered as `LARDEMBHIP`. The pickup banner now wins for its lifetime, as the
+  last print does in the ASM. Attract mode only — a normal game never shows the
+  demo banner, so the glitch was invisible in play (`src/main.c:592`).
+
+---
+
 ## [0.2.1] — 2026-08-17
 
 A review pass over the 0.2.0 parity work: four dimensions of cleanup review,
