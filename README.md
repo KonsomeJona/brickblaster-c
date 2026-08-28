@@ -57,6 +57,40 @@ A polished Arkanoid-style brick breaker with:
 - UI localized in English, French, German, Spanish, Italian, Portuguese
   (in-game power-up labels stay in the original game config — FR / EN / ES)
 
+## The 1999 retail edition
+
+<p align="center">
+  <img src="img/1999_media-pocket_front.webp" alt="Brick Blaster (1999) front cover, Media Pocket" height="300">
+</p>
+
+Brick Blaster shipped on **5 October 1999** as a boxed CD-ROM on
+**Media Pocket**'s budget line, developed by **Carapace (Softplace)**,
+in a complete French edition. The packaging advertises 80 levels and a
+two-player mode.
+
+Both claims check out against the data this port ships:
+`assets/levels/Blaster.lv0` and `Blaster.lv1` hold **40 playable levels
+each** — 80 across the two selectable worlds. A third file,
+`blaster.lv2`, holds 40 more that the 1999 build could never reach: its
+world-2 branch is commented out in the assembly, so selecting it is a
+no-op (see `src/assets.c` `assets_select_world`). The coop and versus
+modes survive too: `main.c:139` folds `nbs_player` and `dual_flag` into
+the `game_mode` that `game.h:181` still documents as 0 = solo, 1 = coop,
+2 = duel.
+
+Twenty-seven years on, the game still surfaces on YouTube: see
+[Brick Blaster - Espace 01-08 - Scores](https://www.youtube.com/watch?v=MkLGir4PYfo)
+by the channel Nheir, a run through the first eight levels of the Space
+world.
+
+> **Licensing note.** The cover image above is reproduced for historical
+> documentation of the original release. It is **not** covered by this
+> repository's GPL v3: the cover artwork belongs to Media Pocket, and
+> the photograph itself comes from a third party. It lives in `img/`,
+> outside the `assets/` tree that holds the game's own data. See
+> [PROVENANCE.md](PROVENANCE.md) §7 for what is and is not established
+> about the rights chain.
+
 ## Fidelity goal
 
 The **target** is byte-exact parity with the 1999 x86 binary. The

@@ -25,6 +25,30 @@ banner (checked by grep across `work400/Blaster/*.ASM`), and no license
 text ships with the 1999 assets. Whatever terms governed the 1999
 commercial release are not present in any repository examined here.
 
+**2021.** The 2024 handover was not the start. Two earlier david4599
+repositories, both about this same game and both predating any access to
+the 1999 sources, were found on 2026-08-28 (dates from the GitHub API):
+
+- `https://github.com/david4599/BrickBlaster-Patch` — created
+  2021-11-16, description: "Patch for the game Brick Blaster (Media
+  Pocket 1999 French and Spanish Versions) to fix some crashes on
+  Windows 7+". GitHub detects **no license** on this repository.
+- `https://github.com/david4599/BrickBlaster-ExtractTools` — created
+  2021-11-22, GPL-3.0, description: "Tools to extract resources of the
+  game Brick Blaster (Media Pocket 1999 French and Spanish Versions) +
+  discovering of hidden features (level editor) and easter eggs".
+
+Two consequences for this record. First, the level editor this port
+ships (`src/screen_editor.c`) was not discovered from the source tree:
+it was found in the shipped 1999 binaries in 2021, two years and four
+months before the sources became available. Second — and this is an
+inference, not an established fact — david4599 was already applying
+GPL-3.0 to his own Brick Blaster tooling in November 2021, while holding
+no 1999 source code at all. That does not establish who chose GPL v3 for
+the 1999 material in 2024, but it does show that GPL-3.0 was this
+publisher's own default before any grant from the author existed. See
+§7 question 7.
+
 **2024.** On 2024-03-10 (repository `created_at` per the GitHub API),
 GitHub user **david4599** published two repositories, both carrying a
 `LICENSE` file containing the verbatim GNU GPL v3 text and both detected
@@ -294,6 +318,10 @@ david4599 (and, where relevant, relayed to Marc Radermacher).
    intended licensing of the TakoHi name and logo files in
    `assets/takohi/`, given that they sit in a GPL v3 tree with no stated
    exception?
+7. Was the GPL v3 on `david4599/BrickBlaster` a term set by Marc
+   Radermacher when he provided the sources, or david4599's own default
+   licence — the one already used on `BrickBlaster-ExtractTools` in
+   November 2021, before any source had changed hands (see §1)?
 
 ## 8. Sources
 
@@ -309,6 +337,16 @@ Online, consulted 2026-08-16:
 
 - https://github.com/david4599/BrickBlaster — repository, README,
   LICENSE, issue tracker (empty).
+- https://github.com/david4599/BrickBlaster-ExtractTools and
+  https://github.com/david4599/BrickBlaster-Patch — the two 2021
+  repositories (consulted 2026-08-28).
+- https://api.github.com/repos/david4599/BrickBlaster-ExtractTools and
+  https://api.github.com/repos/david4599/BrickBlaster-Patch — creation
+  dates 2021-11-22 and 2021-11-16, licence detection GPL-3.0 and none
+  (2026-08-28).
+- https://www.mobygames.com/game/72268/brick-blaster/ — release date
+  1999-10-05 and the 80 levels split "Space" / "Arcade" (2026-08-28;
+  the 2026-08-16 attempt had returned HTTP 403).
 - https://github.com/david4599/BrickBlaster-EOS-Archive — repository,
   README, LICENSE, issue tracker (empty).
 - https://api.github.com/repos/david4599/BrickBlaster and
