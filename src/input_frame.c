@@ -48,6 +48,17 @@ static const float s_tilt_speed[] = { 0.4f, 0.8f, 1.5f, 2.5f, 3.5f };
  * mouse into the touch API, which would false-positive here.) */
 static int s_web_touch_seen = 0;
 
+/* Defined next to input_wait_click_release(), used by frame_input_poll(). */
+static int debounce_input_held(void);
+
+#if defined(PLATFORM_WEB)
+/* Web debounce latch — set by input_wait_click_release(), consumed by
+ * frame_input_poll(). See input_wait_click_release() for why the web build
+ * cannot use the blocking loop. */
+static int    s_debounce_active   = 0;
+static double s_debounce_deadline = 0.0;
+#endif
+
 int input_touch_ui_active(void) {
 #if defined(BRICKBLASTER_MOBILE)
     return 1;                  /* phone/fold build: always touch */
@@ -84,6 +95,16 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
      * Updated unconditionally (avoids an unused-static warning off-web) but
      * only ever READ on PLATFORM_WEB — see input_touch_ui_active(). */
     if (touch_count > 0) s_web_touch_seen = 1;
+
+#if defined(PLATFORM_WEB)
+    /* Debounce in progress: report a fully idle frame so the click that
+     * selected a menu item is not read again by the screen it opened.
+     * `out` is already zeroed, so returning here IS the idle frame. */
+    if (s_debounce_active) {
+        if (debounce_input_held() && GetTime() < s_debounce_deadline) return;
+        s_debounce_active = 0;
+    }
+#endif
 
     /* === Dev toggle === */
     out->dev_f9_pressed = IsKeyPressed(KEY_F9);
@@ -301,22 +322,46 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
  * We spin on PollInputEvents + a 16ms pace (60Hz vsync equivalent) until
  * no input is currently held. Prevents a menu-button hold from being seen
  * as a fresh click by the next screen's read_click. */
+#define DEBOUNCE_TIMEOUT_SEC 2.0   /* safety cap — match ASM max fade */
+
+static int debounce_input_held(void) {
+    return IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
+           IsKeyDown(KEY_SPACE) ||
+           IsKeyDown(KEY_ENTER) ||
+           IsKeyDown(KEY_KP_ENTER) ||
+           IsKeyDown(KEY_LEFT_CONTROL) ||
+           IsKeyDown(KEY_RIGHT_CONTROL) ||
+           gamepad_any_input();
+}
+
 void input_wait_click_release(void) {
-    const double TIMEOUT_SEC = 2.0;  /* safety cap — match ASM max fade */
+#if defined(PLATFORM_WEB)
+    /* Emscripten: this runs INSIDE the browser's requestAnimationFrame
+     * callback, so spinning here can never see the release that ends the
+     * wait — PollInputEvents() on web only copies previous=current and
+     * samples gamepads (raylib platforms/rcore_web.c:551); mouseup/keyup
+     * arrive as DOM callbacks that cannot fire while the wasm frame is on
+     * the stack. And WaitTime() reaches nanosleep(), which without ASYNCIFY
+     * is a busy spin. Every menu click therefore burned the full 2 s
+     * timeout: the next screen appeared a beat late and the sound cut out
+     * with it (miniaudio's web backend is a main-thread ScriptProcessorNode
+     * holding ~43 ms of buffer — 2048 frames, from the low-latency 33 ms
+     * default rounded up to a power of two: external/miniaudio.h:39838-39865,
+     * node created at 40253).
+     *
+     * Same contract, non-blocking: latch, and let frame_input_poll() report
+     * idle frames until the input is actually released or the cap expires. */
+    s_debounce_active   = 1;
+    s_debounce_deadline = GetTime() + DEBOUNCE_TIMEOUT_SEC;
+#else
     double start = GetTime();
     for (;;) {
         PollInputEvents();
-        int held = IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
-                   IsKeyDown(KEY_SPACE) ||
-                   IsKeyDown(KEY_ENTER) ||
-                   IsKeyDown(KEY_KP_ENTER) ||
-                   IsKeyDown(KEY_LEFT_CONTROL) ||
-                   IsKeyDown(KEY_RIGHT_CONTROL) ||
-                   gamepad_any_input();
-        if (!held) break;
-        if (GetTime() - start > TIMEOUT_SEC) break;
+        if (!debounce_input_held()) break;
+        if (GetTime() - start > DEBOUNCE_TIMEOUT_SEC) break;
         WaitTime(0.016);  /* ~60Hz pace — matches ASM wait_synchro */
     }
+#endif
 }
 
 void frame_input_poll_p2(FrameInput *out, int mode) {
