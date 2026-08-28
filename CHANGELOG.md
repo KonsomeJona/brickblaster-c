@@ -19,6 +19,48 @@ _nothing yet_
 
 ---
 
+## [0.2.3] — 2026-08-28
+
+Web responsiveness fix, plus the historical record of the 1999 release.
+
+### Fixed
+
+- **Every menu click froze the web build for 2 seconds, sound included.**
+  `input_wait_click_release()` (`src/input_frame.c`) spun on
+  `PollInputEvents()` until the selecting click was released, capped at a
+  2 s timeout. That works on desktop and Android, where `PollInputEvents()`
+  pumps the platform event queue (`glfwPollEvents()` in raylib's
+  `platforms/rcore_desktop.c`, `ALooper_pollAll()` in `rcore_android.c`).
+  On the web it cannot: `platforms/rcore_web.c` only copies
+  `previous = current` and samples gamepads, and the loop runs inside the
+  browser's `requestAnimationFrame` callback, so the `mouseup` that would
+  end the wait can never be delivered. Every menu click therefore burned
+  the full timeout — measured at **2038 ms** on the deployed itch.io build,
+  with the `mouseup` only registering after the stall ended. The audio cut
+  out with it: without `-sAUDIO_WORKLET`, miniaudio runs a
+  `ScriptProcessorNode` on that same thread, holding 2048 frames
+  (~46 ms at 44.1 kHz). The web path now latches instead of blocking, and
+  `frame_input_poll()` reports idle frames until the input is released or
+  the same 2 s cap expires. Desktop and Android keep the original loop.
+
+### Documentation
+
+- **README** — new *The 1999 retail edition* section: release date,
+  Media Pocket budget line, Carapace (Softplace), and the cover of the
+  French edition. The box's "80 levels" claim is checked against the
+  shipped data (`Blaster.lv0` and `Blaster.lv1`, 40 playable levels each),
+  along with the third level file the 1999 build could never reach.
+- **PROVENANCE.md** — §1 gains a **2021** entry. Two david4599
+  repositories predate the 2024 source handover by two years and four
+  months: `BrickBlaster-Patch` (2021-11-16, no licence detected) and
+  `BrickBlaster-ExtractTools` (2021-11-22, GPL-3.0), the latter
+  documenting the discovery of the hidden level editor **in the 1999
+  binaries** — before any source existed publicly. A new §7 question 7
+  asks upstream whether the GPL v3 was the author's term or already this
+  publisher's own default.
+
+---
+
 ## [0.2.2] — 2026-08-27
 
 Cosmetic fix found while capturing footage for the itch.io page.
