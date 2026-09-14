@@ -56,8 +56,65 @@ int level_load(Level *lvl, const char *path, int level_num);
  * (invalide).  Measured on the 1999 data files: each .lv? is 31,200 bytes
  * whose last 15,600 bytes are all 0xFF — 40 playable levels + 40 empty
  * slots per world.  Returns 0 if the file is missing or has a bad size.
- * Result is cached per world. */
+ * Result is cached per world, and honours the player's edited copy of the
+ * world when there is one (see level_read_world). */
 int level_count(int world);
+
+/* -----------------------------------------------------------------------
+ * Worlds and the player's edited copies (port extension, not in the ASM)
+ *
+ * World files: Blaster.lv0 (space), Blaster.lv1 (arcade), blaster.lv2 (the
+ * third world that MAIN.ASM:495-501 @@coin_coin leaves commented out, never
+ * selectable) and Blaster.lv3 (atoll, added by the port).
+ *
+ * The in-game editor never touches the shipped files. It saves a complete
+ * 31,200-byte copy, <user dir>/custom.lv<world>, which then REPLACES the
+ * shipped world everywhere the game reads it: campaign, level count, demo.
+ * The copy is byte-compatible with the standalone editor and with the 1999
+ * executable's own .lv files.
+ * ----------------------------------------------------------------------- */
+#define LEVEL_FILE_SIZE  31200
+#define LEVEL_WORLDS     4
+#define WORLD_ATOLL      3
+
+/* Directory of the edited copies, with its trailing slash. Default "data/"
+ * (next to blaster.scr); the web build points it at its IndexedDB mount. */
+void level_set_user_dir(const char *dir);
+const char *level_user_dir(void);
+
+/* Path of the edited copy for `world`, whether or not it exists. */
+void level_user_path(int world, char *out, int n);
+
+/* Read a whole world (LEVEL_FILE_SIZE bytes) into buf. With allow_user, the
+ * edited copy wins when it exists and has the right size. Returns 0 on
+ * success, -1 when neither file is readable. */
+int level_read_world(int world, unsigned char *buf, int allow_user);
+
+/* Write / delete the edited copy, then drop the level_count cache. 0 on
+ * success. Deleting a copy that does not exist also succeeds. */
+int level_write_user_world(int world, const unsigned char *buf);
+int level_remove_user_world(int world);
+
+/* Load level N of `world` (edited copy first). Same contract as level_load. */
+int level_load_world(Level *lvl, int world, int level_num);
+
+/* search_level_number on an in-memory world buffer. */
+int level_count_buffer(const unsigned char *buf);
+
+/* Forget every cached level_count (after an import or an edit). */
+void level_count_invalidate(void);
+
+/* An emptied last level is not a level: turn trailing all-empty levels back
+ * into 0xFF slots (at least one level is kept). */
+void level_trim_world(unsigned char *buf);
+
+/* EDITOR.ASM brush bytes: brush 0 normal (21), 1 multi (24), 2 indestructible
+ * (08), 3 transparent (11), 4 teleporter (18); colour 0..3 in bits 7-6. */
+unsigned char level_brush_code(int brush, int color);
+
+/* Background set (sprites/0S_NN.png) and sprite palette of a world. */
+int level_world_bg_set(int world);
+int level_world_palette(int world);
 
 /* -----------------------------------------------------------------------
  * Grid helper — pure functions, testable without file I/O

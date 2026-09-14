@@ -445,8 +445,12 @@ void draw_shutdown(DrawContext *dc) {
      * There is no `load_decor` label anywhere in the sources.
  * ============================================================================ */
 static void draw_background(DrawContext *dc, const Game *g) {
-    int set   = g->world & 1;           /* 0 or 1 */
-    int index = (g->level_num - 1) % ASSETS_BG_COUNT;  /* 0..7 */
+    draw_world_background(dc, g->world, g->level_num);
+}
+
+void draw_world_background(DrawContext *dc, int world, int level_num) {
+    int set   = level_world_bg_set(world);   /* 0 space, 1 arcade, 2 atoll */
+    int index = (level_num - 1) % ASSETS_BG_COUNT;  /* 0..7 */
     const Texture2D *bg = assets_get_background(dc->assets, set, index);
 
     if (bg && dc->assets->backgrounds_loaded[set][index]) {
@@ -528,6 +532,14 @@ static void draw_bricks(DrawContext *dc, const Game *g) {
         Vector2 pos = { (float)b->x, (float)b->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
     }
+}
+
+
+/* Editor preview: the sprite a freshly loaded brick of this byte shows. */
+Rectangle draw_brick_source(unsigned char raw) {
+    Brick b;
+    brick_init(&b, 0, raw);
+    return get_brick_rect(&b);
 }
 
 

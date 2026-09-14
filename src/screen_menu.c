@@ -10,6 +10,7 @@
 #include "i18n.h"
 #include "letterbox.h"
 #include "input_frame.h"
+#include "level.h"       /* WORLD_ATOLL */
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -68,6 +69,11 @@ static const Rectangle BTN_RECT[4] = {
     { 322, 273, 447 - 322, 399 - 273 },   /* d */
 };
 
+/* Port: the level editor has no slot in the 1999 menu table (EDITOR.ASM was
+ * a separate entry), so the main menu gets a text button in the empty black
+ * margin, bottom left, plus the E key. */
+static const Rectangle EDITOR_BTN = { 2, 442, 108, 30 };
+
 /* Per-menu, per-button localised label and title (current menu's context). */
 static StringId menu_label(int menu, int btn) {
     /* menu 1 main: play/demo/misc/quit */
@@ -76,8 +82,10 @@ static StringId menu_label(int menu, int btn) {
     static const StringId M2[4] = { STR_M_ONE_PLAYER, STR_M_COOP, STR_M_DUAL, STR_M_CANCEL };
     /* menu 3 ctrl player 2: computer/keyboard/joystick/cancel */
     static const StringId M3[4] = { STR_M_COMPUTER, STR_M_KEYBOARD, STR_M_JOYSTICK, STR_M_CANCEL };
-    /* menu 4 select world: space/arcade/-/cancel */
-    static const StringId M4[4] = { STR_M_SPACE, STR_M_ARCADE, STR_M_BLANK, STR_M_CANCEL };
+    /* menu 4 select world: space/arcade/-/cancel. The port fills the blank
+     * slot c — left for the commented-out @@coin_coin world, MAIN.ASM:495-501
+     * — with its own fourth world, atoll. */
+    static const StringId M4[4] = { STR_M_SPACE, STR_M_ARCADE, STR_M_ATOLL, STR_M_CANCEL };
     /* menu 5 skill: easy/medium/hard/cancel */
     static const StringId M5[4] = { STR_M_EASY, STR_M_MEDIUM, STR_M_HARD, STR_M_CANCEL };
     /* menu 6 misc: hiscore/hiscore-coop/credits/cancel
@@ -195,7 +203,7 @@ static void menu_apply_action(ScreenState *state, int menu, int btn) {
             switch (btn) {
                 case 0: state->world = 0; state->current_menu = 5; break;       /* space */
                 case 1: state->world = 1; state->current_menu = 5; break;       /* arcade */
-                case 2: break;                                                  /* blank */
+                case 2: state->world = WORLD_ATOLL; state->current_menu = 5; break; /* atoll (port) */
                 case 3: state->current_menu = (state->nbs_player > 1) ? 3 : 2; break; /* cancel */
             }
             break;
@@ -274,6 +282,20 @@ void menu_handle_input(ScreenState *state, MenuAssets *m, AudioState *audio,
         m->cursor_y = (int)(r.y + r.height / 2);
     } else if (hover >= 0) {
         m->hover_button = hover;
+    }
+
+    if (menu == 1) {
+        Vector2 cur = { (float)m->cursor_x, (float)m->cursor_y };
+        int on_editor = has_pointer && CheckCollisionPointRec(cur, EDITOR_BTN);
+        if (IsKeyPressed(KEY_E) || (input->click_pressed && on_editor)) {
+            audio_play(audio, SFX_POWERUP_COLLECT);
+            state->edit_world = state->world;   /* the world last played */
+            state->edit_level = 0;              /* resume where editing stopped */
+            state->game_mode  = STATE_EDIT;
+            m->idle_frames    = 0;
+            input_wait_click_release();
+            return;
+        }
     }
 
     /* Music VU meter drag — MAIN.ASM:649-689 detect_button_music, called from
@@ -431,6 +453,24 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         blit(m->assets->menu_image, isrc, ICON_DST_X, ICON_DST_Y, WHITE);
     }
 
+    /* 2b. Port: slot c of the world icon has no embossed glyph (the world it
+     * was drawn for never shipped). Give Atoll a wave in the same darker
+     * tone the art uses for its S and A. */
+    if (menu == 4) {
+        Rectangle r = BTN_RECT[2];
+        float cx = r.x + r.width * 0.5f, cy = r.y + r.height * 0.5f;
+        int k, i;
+        for (k = -1; k <= 1; k++) {
+            Vector2 prev = { cx - 34.0f, cy + k * 14.0f };
+            for (i = 1; i <= 34; i++) {
+                float x = cx - 34.0f + i * 2.0f;
+                Vector2 p = { x, cy + k * 14.0f + 5.0f * sinf((x - cx) * 0.19f) };
+                DrawLineEx(prev, p, 4.0f, (Color){ 120, 10, 80, 150 });
+                prev = p;
+            }
+        }
+    }
+
     /* 3. Rounded highlight ring around the hovered quadrant — mirrors the
      * disc shape of the menu icon (each button occupies one quadrant of a
      * circular plate). The ASM pulsed the icon palette; with RGBA assets
@@ -444,6 +484,19 @@ void menu_draw(ScreenState *state, MenuAssets *m) {
         unsigned char a = (unsigned char)(140.0f + 80.0f * pulse);
         DrawCircleLines((int)cx, (int)cy, radius,      (Color){255, 255, 255, a});
         DrawCircleLines((int)cx, (int)cy, radius - 1, (Color){255, 255, 255, a});
+    }
+
+    /* 3b. Editor button (port) — main menu only. */
+    if (menu == 1 && m->font_ready) {
+        Vector2 cur = { (float)m->cursor_x, (float)m->cursor_y };
+        int hot = CheckCollisionPointRec(cur, EDITOR_BTN);
+        const char *lbl = i18n(STR_M_EDITOR);
+        int lw = font_string_width(&m->font, lbl);
+        if (hot) DrawRectangleRoundedLines(EDITOR_BTN, 0.3f, 6, 1.0f, (Color){ 255, 255, 255, 190 });
+        font_draw_string(&m->font, lbl,
+                         (int)(EDITOR_BTN.x + (EDITOR_BTN.width - lw) / 2),
+                         (int)(EDITOR_BTN.y + (EDITOR_BTN.height - FONT_CHAR_H) / 2),
+                         hot ? WHITE : (Color){ 190, 190, 210, 255 });
     }
 
     /* 4. Cursor (14x18) pointer sprite. */

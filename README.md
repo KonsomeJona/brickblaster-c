@@ -48,14 +48,76 @@ and Android (experimental — see [`android/README.md`](android/README.md)).
 ## What is BrickBlaster?
 
 A polished Arkanoid-style brick breaker with:
-- **40 levels per world**, 2 worlds (Space, Arcade)
+- **88 levels over 3 worlds**: Space and Arcade (40 each, the 1999 data) and
+  **Atoll**, 8 new levels designed with Claude Fable 5.1 for this port
 - **24 power-ups** (multi-ball, iron ball, laser, magnetic paddle, ghost, teleporters, bonus/malus, …)
 - **Monsters** that spawn periodically and must be dodged or destroyed
 - **2-player** coop and versus (duel) modes
-- **[Separate level editor](https://github.com/KonsomeJona/brickblaster-editor)** to design and test your own levels
+- **Level editor inside the game**: draw, press Tab to play it, press Tab to
+  come back — and the campaign plays what you saved
+- **[Standalone level editor](https://github.com/KonsomeJona/brickblaster-editor)**,
+  whose world files the game opens directly
 - **Demo / attract mode** with AI paddle
 - UI localized in English, French, German, Spanish, Italian, Portuguese
   (in-game power-up labels stay in the original game config — FR / EN / ES)
+
+## The Atoll world
+
+Slot *c* of the world menu has been blank since 1999: it was reserved for a
+third world whose branch (`@@coin_coin`, `MAIN.ASM:495-501`) is commented out.
+The port puts **Atoll** there — a coral island seen from the deep, 8 levels
+designed with Claude Fable 5.1, each built around one idea:
+
+| # | Level | Idea |
+|---|---|---|
+| 1 | the arch | a hollow sea arch the ball clears from the inside |
+| 2 | coral comb | transparent lanes the ball drills straight through |
+| 3 | tide pools | one-hit shells around four-hit cores |
+| 4 | reef roof | get above the concrete roof and it traps the ball up there |
+| 5 | whirlpool | nested rings around a teleporting eye |
+| 6 | shipwreck | a cargo hold you can only reach through the deck |
+| 7 | the trenches | four concrete shafts plugged by four-hit bricks |
+| 8 | kraken | the boss: head, eyes, tentacles, and two teleporters |
+
+The levels live in `tools/levels/atoll.txt`, a readable grid that
+`tools/txt2lv.py` compiles into `assets/levels/Blaster.lv3` (the same 31,200-byte
+format as the 1999 worlds). `bb_tests` checks that every breakable brick of
+every level can be reached. The backgrounds are the Space set regraded as deep
+water (`tools/make_atoll_backgrounds.py`), and the world plays the credits
+module, the one track the 1999 campaign never used.
+
+![Atoll, level 8: the kraken](site/img/atoll-kraken.png)
+
+## Level editor in the game
+
+Press **E** on the main menu (or click **editor**, bottom left), or **E** while
+a game is paused to edit the level you were playing.
+
+![The in-game editor on Atoll's kraken](site/img/editeur-jeu.png)
+
+- The screen is the 1999 editor's: the world's own background and bricks, the
+  original F1–F12 panel. Left click draws, right click erases; the buttons on
+  the left do everything with a mouse or a finger (**eraser** replaces the
+  right click on touch screens).
+- **Tab** (or **TEST**) plays the level in the real game. Clearing it, losing
+  it, **Tab** or **Esc** bring you back to the editor with the grid untouched.
+- Every change is saved at once, to `data/custom.lv0` / `.lv1` / `.lv3` next to
+  the high scores (in the browser: IndexedDB). That copy **replaces the shipped
+  world in the campaign**: edit level 5 of Space, then play Space, and level 5
+  is yours. **RESET** (F11) puts the shipped level back; when a whole world is
+  back to its shipped bytes the copy is deleted.
+- Drawing on the empty slot after the last level adds a level (up to 80);
+  emptying the last level removes it. **Ctrl Z** undoes 32 steps.
+- Keys follow `EDITOR.ASM`: F1–F4 normal / multi / indestructible / transparent,
+  F9 teleporter, F5–F8 (or 1–4) colours, F10 swap with the clipboard,
+  PgUp/PgDn levels, arrows and Space/Delete to draw with the keyboard,
+  **W** changes world.
+
+**With the standalone editor.** Drop a world (`.lv0`, `.lv1`, `.lv3` —
+31,200 bytes) or a level (`.lvl` — 390 bytes) on the game window, or open it
+with the game (`brickblaster my-world.lv0`): it lands in the editor, saved as
+the edited copy of that world, ready to play. Going the other way, the edited
+copy in `data/` is a normal world file the standalone editor imports.
 
 ## Standalone level editor
 
@@ -84,8 +146,8 @@ build from source and are not validated by that archive.
    Enter. **PgUp/PgDn** select a level; **Ctrl Insert** appends one.
 
 World files preserve the original binary format. Individual `.lvl` files are
-an editor extension, and the main game's release does not expose a custom-level
-file picker. Use the editor's built-in test to play your changes immediately.
+an editor extension. To play a world or level made there in the game, drop the
+file on the game window (see [Level editor in the game](#level-editor-in-the-game)).
 The original layout, resources and routines have targeted parity checks;
 [documented extensions and limitations](https://github.com/KonsomeJona/brickblaster-editor/blob/main/FIDELITY.md)
 mean this is not a claim of complete equivalence with the 1999 executable.
@@ -282,6 +344,8 @@ cmake -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DTAKOHI_BRANDING=OFF -DGIF_RE
 | Back | Esc | B (Circle) | On-screen button |
 | Music / SFX volume | drag the menu VU meter | — | drag |
 | Screenshot GIF | F12 | — | — |
+| Level editor | E (main menu, or paused) | — | **editor** button |
+| Test / back to editor | Tab | — | **TEST** button / pause → exit |
 
 **2-player keyboard** — P1 arrows + Space, P2 Q/A (left) D (right) + F.
 A/D also move P1 in solo, but not while P2 is on the keyboard — A is P2's
@@ -305,7 +369,8 @@ assets/
   menu/ title/    Menu and title screen art
   takohi/         Publisher branding (stripped by -DTAKOHI_BRANDING=OFF)
   levels/         Level files (.lv0 / .lv1 / .lv2 — 80 slots of 390 bytes,
-                  40 real levels then 0xFF padding)
+                  40 real levels then 0xFF padding; .lv3 = Atoll, 8 levels)
+tools/            Atoll level source + compiler, background regrading script
   backgrounds/    Menu / hiscore backgrounds
 data/
   blaster.cfg     Optional runtime config override (mirrors ASM Blaster.cfg)
@@ -327,6 +392,9 @@ section 5, the following prominent modifications were made in 2026:
   rendering, audio, and input abstraction.
 - Target platforms extended from Windows/DOS to Linux, macOS, the Web
   (WebAssembly) and Android.
+- A fourth world, Atoll (new levels, regraded backgrounds), in the world
+  menu's blank slot, and an in-game level editor whose saved worlds replace
+  the shipped ones in play (2026-09).
 - Main loop converted from vsync-locked 70 Hz (DOS IRQ timer) to 60 Hz
   via raylib frame pacing with custom `SUPPORT_CUSTOM_FRAME_CONTROL`.
 - Palette-indexed VGA rendering replaced by RGBA textures. The palette

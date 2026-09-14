@@ -66,7 +66,7 @@
 #include "i18n.h"
 #include "gif_recorder.h"
 #include "screen_editor.h"
-extern void editor_bind_assets(Assets *a);
+#include "level.h"
 #include "input_frame.h"
 #include "demo.h"
 #include "settings.h"
@@ -121,6 +121,15 @@ static FrameInput         fi;  /* polled once per frame, passed to game_update *
 #define PAUSE_COOLDOWN_FRAMES 20
 static int pause_cooldown = 0;
 
+/* In-game editor test run (port extension). While editor_testing is set, the
+ * session plays the editor's grid and every way out of it — level cleared,
+ * game over, Tab, Esc, pause exit — returns to STATE_EDIT instead of the
+ * next level, the hiscore table or the menu. editor_resume tells STATE_EDIT
+ * to keep the editor as it was rather than reopen it. */
+static int      editor_testing = 0;
+static int      editor_resume  = 0;
+static GameMode last_mode      = STATE_INTRO;
+
 /* -----------------------------------------------------------------------
  * init_game_session — first-entry game initialisation.
  * Shared by the ready-overlay path (normal play: ball waits for fire) and
@@ -141,8 +150,9 @@ static void init_game_session(void) {
     game.world = state.world;
     /* Per-world sprite palette. MAIN.ASM:483/491  mov B [file_palette+6],'0'/'1'
      * patches the palette filename, and FILE.ASM:776-791 Read_Palette swaps the
-     * sprite sheet's 768-byte palette on every world load. */
-    assets_select_world(&assets, state.world);
+     * sprite sheet's 768-byte palette on every world load. The port's atoll
+     * world has no palette of its own and uses sprite0.pal. */
+    assets_select_world(&assets, level_world_palette(state.world));
     game.control_p2 = state.control_p2;
     /* P1-ASM-34: inject cfg-derived per-difficulty spawn spacing. */
     game_set_powerup_spacing(&game, cfg.delai_between_option);
@@ -198,6 +208,43 @@ static void init_game_session(void) {
     game_initialized = 1;
 }
 
+/* Editor TEST: a solo session on the grid being edited, at its own level
+ * number so the speed ramp and background match the campaign. */
+static void start_editor_test(void) {
+    editor_state.test_requested = 0;
+    state.world      = editor_state.world;
+    state.nbs_player = 1;
+    state.dual_flag  = 0;
+    state.demo_flag  = 0;
+    if (state.difficulte != 1 && state.difficulte != 2 && state.difficulte != 4)
+        state.difficulte = 2;
+    init_game_session();
+    game_load_level_bricks(&game, editor_state.level_num, editor_grid(&editor_state));
+    game_spawn_ball(&game);
+    game.state       = STATE_READY_TO_PLAY;
+    state.game_mode  = STATE_READY_TO_PLAY;
+    play_again_timer = 0;
+    editor_testing   = 1;
+}
+
+static void end_editor_test(const char *message) {
+    editor_testing   = 0;
+    editor_resume    = 1;
+    game_initialized = 0;
+    game.state       = STATE_EDIT;
+    state.game_mode  = STATE_EDIT;
+    editor_state.need_release = 1;
+    if (message) editor_show_message(&editor_state, message);
+    input_wait_click_release();
+}
+
+/* Small reminder in the left margin (raylib font, port addition). */
+static void draw_side_hint(const char *text) {
+    int w = MeasureText(text, 10);
+    DrawRectangle(4, 4, w + 8, 16, (Color){ 0, 0, 0, 170 });
+    DrawText(text, 8, 7, 10, (Color){ 250, 220, 90, 255 });
+}
+
 /* -----------------------------------------------------------------------
  * UpdateDrawFrame — one iteration of the main loop.
  * Called each frame by emscripten_set_main_loop (web) or the while loop (native).
@@ -215,6 +262,18 @@ static void UpdateDrawFrame(void) {
      * tick would freeze the stream between draws and desynchronise every
      * random event from the 1999 binary. */
     asm_calc_random();
+
+#if defined(PLATFORM_WEB)
+    /* The IndexedDB copy of the edited worlds arrives asynchronously after
+     * start-up (see main): forget any level count read before it did. */
+    {
+        static int persist_ready = 0;
+        if (!persist_ready && EM_ASM_INT({ return Module.bbPersistReady | 0; })) {
+            persist_ready = 1;
+            level_count_invalidate();
+        }
+    }
+#endif
 
     /* Web: no PollInputEvents() here — it runs at the END of the frame, see
      * SwapScreenBuffer() below. Polling at the top destroyed every input edge
@@ -319,6 +378,25 @@ static void UpdateDrawFrame(void) {
      * ----------------------------------------------------------- */
     /* F12 toggles GIF recording (global) */
     if (IsKeyPressed(KEY_F12)) gif_recorder_toggle();
+
+    /* A world (.lv0/.lv1/.lv3, 31,200 bytes) or a level (.lvl, 390 bytes —
+     * the standalone editor's formats) dropped on the window opens in the
+     * editor. Ignored mid-game so a stray drop cannot end a session. */
+    if (IsFileDropped()) {
+        FilePathList dropped = LoadDroppedFiles();
+        if (dropped.count > 0 &&
+            (state.game_mode == STATE_MENU || state.game_mode == STATE_EDIT)) {
+            editor_import_file(&editor_state, dropped.paths[0]);
+            if (state.game_mode != STATE_EDIT) editor_resume = 1;
+            state.game_mode = STATE_EDIT;
+        }
+        UnloadDroppedFiles(dropped);
+    }
+
+    /* Editor test run: clearing the level returns to the editor instead of
+     * loading the next one. */
+    if (state.game_mode == STATE_NEW_PLAY && game_initialized && editor_testing)
+        end_editor_test(i18n(STR_OPT_ED_CLEARED));
 
     if (state.game_mode == STATE_NEW_PLAY && game_initialized) {
         game.level_num++;
@@ -473,10 +551,17 @@ static void UpdateDrawFrame(void) {
      * STATE_EDIT: Level editor (EDITOR.ASM)
      * --------------------------------------------------------------- */
     case STATE_EDIT:
-        if (!editor_state.loaded) editor_init(&editor_state);
+        /* Entering from the menu or the pause screen opens the requested
+         * world/level; coming back from a test run (or an import) resumes. */
+        if (last_mode != STATE_EDIT) {
+            if (editor_resume) editor_resume = 0;
+            else editor_open(&editor_state, state.edit_world, state.edit_level);
+        }
         editor_update(&state, &editor_state, &fi);
+        /* This frame still shows the editor; the test starts next frame. */
+        if (editor_state.test_requested) start_editor_test();
         BeginTextureMode(dc.canvas);
-        editor_draw(&editor_state);
+        editor_draw(&editor_state, &dc);
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
@@ -513,6 +598,10 @@ static void UpdateDrawFrame(void) {
          * convention (not in ASM, which only listened for fire on this
          * overlay). Checked before spawn/draw so a stray press doesn't
          * initialise a game that the user immediately abandons. */
+        if (editor_testing && (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_TAB))) {
+            end_editor_test(NULL);
+            break;
+        }
         if (IsKeyPressed(KEY_ESCAPE)) {
             state.game_mode    = STATE_MENU;
             state.current_menu = 1;
@@ -554,6 +643,7 @@ static void UpdateDrawFrame(void) {
         } else {
             draw_ready_screen(&state);
         }
+        if (editor_testing) draw_side_hint(i18n(STR_ED_TEST_HINT));
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
@@ -574,6 +664,11 @@ static void UpdateDrawFrame(void) {
          * through the ready overlay (MAIN.ASM:99  mov game_mode,PLAYING) —
          * initialise the session on demand. */
         if (!game_initialized) init_game_session();
+
+        if (editor_testing && IsKeyPressed(KEY_TAB)) {
+            end_editor_test(NULL);
+            break;
+        }
 
         /* Pause: P key, gamepad Start, or pause button. */
         if (fi.pause_pressed) {
@@ -597,6 +692,7 @@ static void UpdateDrawFrame(void) {
          * ("large ship" over "demo" rendered as LARDEMBHIP). Let the pickup
          * banner win for its lifetime, as the last print does in the ASM. */
         if (state.demo_flag && game.pickup_text_timer <= 0) draw_demo_overlay();
+        if (editor_testing) draw_side_hint(i18n(STR_ED_TEST_HINT));
 #if defined(BRICKBLASTER_MOBILE)
         /* Fire enabled only when ball is on paddle or gun is active */
         mobile_controls_draw("FIRE",
@@ -627,8 +723,30 @@ static void UpdateDrawFrame(void) {
         /* Handle music/sfx toggle + resume/exit button taps every frame.
          * Returns 0=nothing, 1=resume tapped, 2=audio-toggle tap consumed. */
         int resume_pressed = pause_handle_input(&state, &fi);
+        /* In a test run, EXIT goes back to the editor, not the menu. */
+        if (editor_testing && state.game_mode == STATE_MENU) {
+            end_editor_test(NULL);
+            break;
+        }
         /* EXIT may have changed state to STATE_MENU — don't override it */
         if (state.game_mode != STATE_PAUSED) break;
+
+        /* Port: Esc/Tab end a test run; E opens this level in the editor
+         * (the session is abandoned, like EXIT). */
+        if (editor_testing && (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_TAB) ||
+                               IsKeyPressed(KEY_E))) {
+            end_editor_test(NULL);
+            break;
+        }
+        if (!state.demo_flag && IsKeyPressed(KEY_E) &&
+            editor_world_valid(game.world)) {
+            state.edit_world = game.world;
+            state.edit_level = game.level_num;
+            state.game_mode  = STATE_EDIT;
+            game.state       = STATE_EDIT;
+            game_initialized = 0;
+            break;
+        }
 
         /* ESC from a paused game exits to the main menu — desktop UX
          * convention (David feedback, 2026-04-21). Checked before the
@@ -668,6 +786,10 @@ static void UpdateDrawFrame(void) {
         draw_frame_to_canvas(&dc, &game);   /* frozen game underneath */
         BeginTextureMode(dc.canvas);
         draw_pause_screen(&state);
+        if (editor_testing)
+            draw_side_hint(i18n(STR_ED_TEST_HINT));
+        else if (!state.demo_flag && editor_world_valid(game.world))
+            draw_side_hint(i18n(STR_ED_PAUSE_HINT));
 #if defined(BRICKBLASTER_MOBILE)
         mobile_controls_draw("FIRE", 1);
 #endif
@@ -687,6 +809,11 @@ static void UpdateDrawFrame(void) {
     case STATE_GAME_OVER:
         /* ESC short-circuits the hiscore entry and returns to menu —
          * modern UX convention (not in ASM). */
+        if (editor_testing && IsKeyPressed(KEY_ESCAPE)) {
+            game_over_timer = 0;
+            end_editor_test(i18n(STR_OPT_GAME_OVER));
+            break;
+        }
         if (IsKeyPressed(KEY_ESCAPE)) {
             game_over_timer  = 0;
             game_initialized = 0;
@@ -733,6 +860,12 @@ static void UpdateDrawFrame(void) {
                            (GetKeyPressed() != 0 || fi.click_pressed ||
                             gamepad_confirm() || gamepad_back());
             if (!(can_skip || game_over_timer >= GAME_OVER_DELAY_FRAMES)) break;
+        }
+        /* A lost test run goes back to the editor, never to the hiscores. */
+        if (editor_testing) {
+            game_over_timer = 0;
+            end_editor_test(i18n(STR_OPT_GAME_OVER));
+            break;
         }
         {
             game_over_timer  = 0;
@@ -799,6 +932,7 @@ static void UpdateDrawFrame(void) {
      * Only the _AGAIN → _AGAIN persistence matters here; other transitions
      * are fine. */
     prev_ready_state = state.game_mode;
+    last_mode        = state.game_mode;
 
     /* GIF recorder: capture canvas once per frame if recording. Also draw REC
      * indicator in window coordinates so it appears over the letterbox. */
@@ -817,7 +951,18 @@ static void UpdateDrawFrame(void) {
 #endif
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    /* A file given on the command line (or dropped on the executable) opens
+     * in the editor. Make it absolute now: the CWD moves to the exe below. */
+    char open_path[1024] = "";
+    if (argc > 1 && argv[1][0] != '-') {
+        if (argv[1][0] == '/' || argv[1][0] == '\\' ||
+            (argv[1][0] && argv[1][1] == ':'))
+            snprintf(open_path, sizeof(open_path), "%s", argv[1]);
+        else
+            snprintf(open_path, sizeof(open_path), "%s/%s", GetWorkingDirectory(), argv[1]);
+    }
+
     /* ---------------------------------------------------------------
      * Initialization
      * MAIN.ASM:1-59 - setup window, audio, load assets
@@ -943,7 +1088,6 @@ int main(void) {
      * intro has 36 frames and final has 418 frames, so deferring
      * them cuts startup time dramatically (especially on Wear OS / web). */
     overlays_init(&assets);
-    editor_bind_assets(&assets);
     final_bind_font(&assets);
     menu_assets_load(&menu, &assets);
     hiscore_screen_load(&hiscore_screen, &assets);
@@ -983,6 +1127,24 @@ int main(void) {
 #else
     state.game_mode = STATE_INTRO_ORIGINAL;  /* TakoHi slide is at the END */
 #endif
+
+#if defined(PLATFORM_WEB)
+    /* Edited worlds live in IndexedDB so they survive a reload: mount it at
+     * /persist and pull its content in. syncfs is asynchronous; UpdateDrawFrame
+     * drops the level-count cache once Module.bbPersistReady is set. */
+    EM_ASM({
+        try { FS.mkdir('/persist'); } catch (e) {}
+        try { FS.mount(IDBFS, {}, '/persist'); } catch (e) {}
+        Module.bbPersistReady = 0;
+        FS.syncfs(true, function (e) { Module.bbPersistReady = 1; });
+    });
+    level_set_user_dir("/persist/");
+#endif
+
+    if (open_path[0] && editor_import_file(&editor_state, open_path) == 0) {
+        state.game_mode = STATE_EDIT;
+        editor_resume   = 1;
+    }
 
     /* ---------------------------------------------------------------
      * Main Loop

@@ -40,9 +40,11 @@
 #define ASSETS_BASE "assets/"
 #endif
 
-/* Number of background images per level set (8 backgrounds, 2 sets) */
+/* Number of background images per level set (8 backgrounds, 3 sets: space,
+ * arcade, and the port's atoll set derived from space — see
+ * tools/make_atoll_backgrounds.py and level_world_bg_set). */
 #define ASSETS_BG_COUNT     8
-#define ASSETS_BG_SETS      2
+#define ASSETS_BG_SETS      3
 
 /*
  * Number of per-world sprite sheets.

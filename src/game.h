@@ -378,6 +378,11 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
  * MAIN.ASM:4906-4911  speed_level = speed_delai - (current_level-1)*17 */
 void game_load_level(Game *g, int level_num);
 
+/* Same as game_load_level, but the 390 brick bytes come from memory — the
+ * editor's test run plays the grid being edited, not the file on disk.
+ * level_num still drives the speed ramp, background and monsters. */
+void game_load_level_bricks(Game *g, int level_num, const unsigned char *bricks);
+
 /* Place ball on paddle centre, set magnetic.  Does NOT change g->state;
  * callers must set the appropriate READY_TO_PLAY / READY_TO_PLAY_AGAIN state.
  * MAIN.ASM:5173-5231  init_start_game

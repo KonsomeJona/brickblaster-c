@@ -25,11 +25,12 @@
     <section>
       <h2>Le jeu</h2>
       <ul class="liste">
-        <li><b>80 niveaux</b> sur deux mondes, l'Espace et l'Arcade</li>
+        <li><b>88 niveaux</b> sur trois mondes : l'Espace et l'Arcade de 1999, et <a href="#atoll">l'Atoll</a>, tout nouveau</li>
         <li><b>24 bonus</b> : multi-balle, balle de fer, laser, raquette magnétique, fantôme, téléporteurs…</li>
         <li>Des <b>monstres</b> qui surgissent : à esquiver ou à détruire</li>
         <li><b>À deux</b>, en coopération ou en duel, sur un clavier ou deux manettes</li>
-        <li>Un mode démo avec sa raquette automatique ; un <a href="#editeur">éditeur autonome disponible sur GitHub</a></li>
+        <li>Un <a href="#editeur">éditeur de niveaux intégré au jeu</a> : on dessine, Tab pour jouer, Tab pour revenir</li>
+        <li>Un mode démo avec sa raquette automatique</li>
         <li>En français, anglais, allemand, espagnol, italien et portugais</li>
       </ul>
     </section>
@@ -41,9 +42,31 @@
       <img src="img/ecran-4.png" width="640" height="480" alt="Un niveau devant une Terre vue de l'espace" loading="lazy">
     </section>
 
+    <section id="atoll">
+      <h2>Nouveau monde : l'Atoll</h2>
+      <p>Depuis 1999, le menu des mondes garde un quadrant vide : il attendait un troisième monde resté en commentaire dans le code assembleur. L'Atoll l'occupe désormais — une île de corail vue des profondeurs, huit niveaux conçus avec Claude Fable 5.1, chacun autour d'une idée : l'arche que la balle nettoie de l'intérieur, les couloirs transparents du peigne de corail, la cale d'une épave qu'on n'atteint que par le pont, et le kraken pour finir.</p>
+      <div class="ecrans">
+        <figure>
+          <img src="img/atoll-arche.png" width="640" height="480" alt="Premier niveau de l'Atoll, une arche de briques sur fond marin" loading="lazy">
+          <figcaption>Niveau 1, l'arche.</figcaption>
+        </figure>
+        <figure>
+          <img src="img/atoll-kraken.png" width="640" height="480" alt="Le kraken, dernier niveau de l'Atoll, avec ses tentacules et ses téléporteurs" loading="lazy">
+          <figcaption>Niveau 8, le kraken.</figcaption>
+        </figure>
+      </div>
+    </section>
+
     <section id="editeur">
       <h2>L'éditeur de niveaux</h2>
-      <p>Un projet autonome C/raylib reprend l'écran, le panneau, les sprites et les touches de l'éditeur de 1999. Il permet d'importer et d'exporter les mondes au format d'origine, de travailler sur un niveau seul et de le tester avant de revenir au dessin.</p>
+      <p><b>Dans le jeu.</b> Touche E au menu principal (ou bouton « editor »), ou E en pause pour modifier le niveau en cours. On dessine sur le vrai décor avec le panneau de 1999, Tab lance le niveau dans le jeu, et on revient au dessin intact dès qu'on le termine, qu'on le perd ou qu'on appuie sur Tab. Chaque modification est enregistrée aussitôt — dans le navigateur aussi — et la campagne joue ensuite vos niveaux.</p>
+      <div class="ecrans">
+        <figure>
+          <img src="img/editeur-jeu.png" width="640" height="480" alt="Éditeur intégré au jeu sur le niveau kraken de l'Atoll" loading="lazy">
+          <figcaption>L'éditeur intégré : boutons à gauche, panneau d'origine à droite.</figcaption>
+        </figure>
+      </div>
+      <p><b>L'éditeur autonome.</b> Un projet C/raylib séparé reprend l'écran, le panneau, les sprites et les touches de l'éditeur de 1999. Il importe et exporte les mondes au format d'origine ; il suffit de déposer le fichier sur la fenêtre du jeu pour y jouer.</p>
       <div class="ecrans">
         <figure>
           <img src="img/editeur-niveaux.png" width="1280" height="960" alt="Éditeur de niveaux avec le panneau original F1 à F12" loading="lazy">
@@ -54,7 +77,7 @@
           <figcaption>Test intégré ; le dessin est conservé.</figcaption>
         </figure>
       </div>
-      <p><b>Éditeur 0.1.0 — programme séparé du jeu.</b> Sources C/raylib et assembleur, guide illustré et binaire Linux ARM64 sont disponibles sur GitHub. F11 importe, F12 sauvegarde un monde et Tab lance le test du niveau.</p>
+      <p><b>Éditeur autonome 0.1.0.</b> Sources C/raylib et assembleur, guide illustré et binaire Linux ARM64 sont disponibles sur GitHub. F11 importe, F12 sauvegarde un monde et Tab lance le test du niveau.</p>
       <p><a href="https://github.com/KonsomeJona/brickblaster-editor/releases/latest">Télécharger l’éditeur</a> · <a href="https://github.com/KonsomeJona/brickblaster-editor#readme">Guide et sources</a> · <a href="https://github.com/KonsomeJona/brickblaster-editor/blob/main/reference/EDITOR.ASM">Éditeur assembleur original</a></p>
       <p>Le panneau, les ressources et les routines ont fait l’objet de vérifications ciblées. Les dialogues, l’historique et le test isolé sont des extensions ; les limites de fidélité sont documentées dans le dépôt.</p>
     </section>

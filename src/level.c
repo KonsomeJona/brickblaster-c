@@ -2,10 +2,15 @@
 #include "assets.h"   /* ASSETS_BASE — same path convention as game_load_level */
 #include <string.h>
 #include <stdio.h>    /* snprintf (level_count path building) */
+#include <stdlib.h>
 #if defined(PLATFORM_ANDROID)
     #include "raylib.h"
+#elif defined(_WIN32)
+    #include <direct.h>
+    #define PORTABLE_MKDIR(p) _mkdir(p)
 #else
-    #include <stdlib.h>
+    #include <sys/stat.h>
+    #define PORTABLE_MKDIR(p) mkdir((p), 0755)
 #endif
 
 /* level.c - Level file loading from FILE.ASM
@@ -31,8 +36,8 @@
  *   0x00 = ABSENTE (empty), 0xFF = INVALIDE
  */
 
-/* Expected total file size — FILE.ASM:1205 "cmp ecx,31200" */
-#define LEVEL_FILE_SIZE  31200
+/* Expected total file size — FILE.ASM:1205 "cmp ecx,31200" (LEVEL_FILE_SIZE,
+ * level.h). */
 
 /* -----------------------------------------------------------------------
  * level_load
@@ -76,28 +81,10 @@ static void free_file_data(unsigned char *data) {
 #endif
 }
 
-int level_load(Level *lvl, const char *path, int level_num) {
-    int data_size = 0;
-    unsigned char *data;
-    long offset;
+static void fill_level(Level *lvl, const unsigned char *src) {
     int i;
 
-    if (!lvl || !path) return -1;
-    if (level_num < 1 || level_num > LEVELS_PER_FILE) return -1;
-
-    /* FILE.ASM:1205 — file MUST be exactly 31200 bytes. */
-    data = read_file_data(path, &data_size);
-    if (!data) return -1;
-
-    if (data_size != LEVEL_FILE_SIZE) {
-        free_file_data(data);
-        return -1;
-    }
-
-    /* Seek to level N: offset = (N-1) * BRICK_COUNT  (MAIN.ASM:1711-1714) */
-    offset = (long)(level_num - 1) * BRICK_COUNT;
-    memcpy(lvl->bricks, data + offset, BRICK_COUNT);
-    free_file_data(data);
+    memcpy(lvl->bricks, src, BRICK_COUNT);
 
     /* Fill metadata */
     lvl->cols  = BRICK_COLS;
@@ -113,8 +100,178 @@ int level_load(Level *lvl, const char *path, int level_num) {
             lvl->brick_count++;
         }
     }
+}
 
+int level_load(Level *lvl, const char *path, int level_num) {
+    int data_size = 0;
+    unsigned char *data;
+
+    if (!lvl || !path) return -1;
+    if (level_num < 1 || level_num > LEVELS_PER_FILE) return -1;
+
+    /* FILE.ASM:1205 — file MUST be exactly 31200 bytes. */
+    data = read_file_data(path, &data_size);
+    if (!data) return -1;
+
+    if (data_size != LEVEL_FILE_SIZE) {
+        free_file_data(data);
+        return -1;
+    }
+
+    /* Seek to level N: offset = (N-1) * BRICK_COUNT  (MAIN.ASM:1711-1714) */
+    fill_level(lvl, data + (long)(level_num - 1) * BRICK_COUNT);
+    free_file_data(data);
     return 0;
+}
+
+/* -----------------------------------------------------------------------
+ * Worlds and edited copies — see level.h.
+ * ----------------------------------------------------------------------- */
+static char s_user_dir[256] = "data/";
+static int  s_count_cache[LEVEL_WORLDS] = { -1, -1, -1, -1 };
+
+void level_count_invalidate(void) {
+    int i;
+    for (i = 0; i < LEVEL_WORLDS; i++) s_count_cache[i] = -1;
+}
+
+void level_set_user_dir(const char *dir) {
+    snprintf(s_user_dir, sizeof(s_user_dir), "%s", dir ? dir : "");
+    level_count_invalidate();
+}
+
+const char *level_user_dir(void) { return s_user_dir; }
+
+void level_user_path(int world, char *out, int n) {
+    snprintf(out, (size_t)n, "%scustom.lv%d", s_user_dir, world);
+}
+
+/* Whole file, or NULL when missing or not exactly LEVEL_FILE_SIZE bytes. */
+static unsigned char *read_world_file(const char *path) {
+    int size = 0;
+    unsigned char *data = read_file_data(path, &size);
+    if (data && size != LEVEL_FILE_SIZE) {
+        free_file_data(data);
+        data = NULL;
+    }
+    return data;
+}
+
+int level_read_world(int world, unsigned char *buf, int allow_user) {
+    char path[300];
+    unsigned char *data = NULL;
+
+    if (!buf || world < 0 || world >= LEVEL_WORLDS) return -1;
+    if (allow_user) {
+        level_user_path(world, path, sizeof(path));
+        data = read_world_file(path);
+    }
+    if (!data) {
+        /* Capitalised filename first, lowercase fallback (blaster.lv2). */
+        snprintf(path, sizeof(path), ASSETS_BASE "levels/Blaster.lv%d", world);
+        data = read_world_file(path);
+    }
+    if (!data) {
+        snprintf(path, sizeof(path), ASSETS_BASE "levels/blaster.lv%d", world);
+        data = read_world_file(path);
+    }
+    if (!data) return -1;
+    memcpy(buf, data, LEVEL_FILE_SIZE);
+    free_file_data(data);
+    return 0;
+}
+
+int level_write_user_world(int world, const unsigned char *buf) {
+    char path[300];
+    int rc = -1;
+
+    if (!buf || world < 0 || world >= LEVEL_WORLDS) return -1;
+    level_user_path(world, path, sizeof(path));
+#if defined(PLATFORM_ANDROID)
+    rc = SaveFileData(path, (void *)buf, LEVEL_FILE_SIZE) ? 0 : -1;
+#else
+    {
+        /* The directory may not exist yet on a fresh install: without it
+         * fopen fails and the edit is silently lost. */
+        char dir[256];
+        size_t len;
+        FILE *f;
+        snprintf(dir, sizeof(dir), "%s", s_user_dir);
+        len = strlen(dir);
+        if (len > 1 && (dir[len - 1] == '/' || dir[len - 1] == '\\')) dir[len - 1] = '\0';
+        if (dir[0]) PORTABLE_MKDIR(dir);   /* already there: harmless EEXIST */
+        f = fopen(path, "wb");
+        if (f) {
+            if (fwrite(buf, 1, LEVEL_FILE_SIZE, f) == LEVEL_FILE_SIZE) rc = 0;
+            if (fclose(f) != 0) rc = -1;
+        }
+    }
+#endif
+    level_count_invalidate();
+    return rc;
+}
+
+int level_remove_user_world(int world) {
+    char path[300];
+    FILE *f;
+
+    if (world < 0 || world >= LEVEL_WORLDS) return -1;
+    level_user_path(world, path, sizeof(path));
+    level_count_invalidate();
+#if defined(PLATFORM_ANDROID)
+    /* Relative paths resolve inside internal storage only through raylib's
+     * file wrappers; there is no remove wrapper. The caller keeps the copy. */
+    (void)f;
+    return -1;
+#else
+    f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return remove(path) == 0 ? 0 : -1;
+#endif
+}
+
+int level_load_world(Level *lvl, int world, int level_num) {
+    unsigned char *buf;
+
+    if (!lvl || level_num < 1 || level_num > LEVELS_PER_FILE) return -1;
+    buf = (unsigned char *)malloc(LEVEL_FILE_SIZE);
+    if (!buf) return -1;
+    if (level_read_world(world, buf, 1) != 0) {
+        free(buf);
+        return -1;
+    }
+    fill_level(lvl, buf + (long)(level_num - 1) * BRICK_COUNT);
+    lvl->world = world;
+    free(buf);
+    return 0;
+}
+
+void level_trim_world(unsigned char *buf) {
+    int n = level_count_buffer(buf);
+    while (n > 1) {
+        unsigned char *lv = buf + (n - 1) * BRICK_COUNT;
+        int i;
+        for (i = 0; i < BRICK_COUNT && lv[i] == 0x00; i++) {}
+        if (i < BRICK_COUNT) break;
+        memset(lv, 0xFF, BRICK_COUNT);
+        n--;
+    }
+}
+
+unsigned char level_brush_code(int brush, int color) {
+    /* EDITOR.ASM:223-266 F1-F5 handlers (F2 = normale + 4 hits, P1-ASM-25). */
+    static const unsigned char code[5] = { 0x21, 0x24, 0x08, 0x11, 0x18 };
+    if (brush < 0 || brush > 4) brush = 0;
+    return (unsigned char)(code[brush] | ((color & 3) << 6));
+}
+
+int level_world_bg_set(int world) {
+    return (world == WORLD_ATOLL) ? 2 : (world & 1);
+}
+
+int level_world_palette(int world) {
+    return (world == WORLD_ATOLL) ? 0 : (world & 1);
 }
 
 /* -----------------------------------------------------------------------
@@ -141,41 +298,29 @@ int level_load(Level *lvl, const char *path, int level_num) {
  * (Error_File); here we return the full capacity instead — all levels are
  * valid, refusing to play them helps nobody.  Missing/short file → 0.
  * ----------------------------------------------------------------------- */
-int level_count(int world) {
-    static int cache[3] = { -1, -1, -1 };
-    char path[128];
-    unsigned char *data;
-    int data_size = 0;
-    int n, off;
-
-    if (world < 0 || world > 2) return 0;
-    if (cache[world] >= 0) return cache[world];
-
-    /* Same path convention as game_load_level (game.c): capitalised
-     * filename first, lowercase fallback (blaster.lv2 is lowercase). */
-    snprintf(path, sizeof(path), ASSETS_BASE "levels/Blaster.lv%d", world);
-    data = read_file_data(path, &data_size);
-    if (!data) {
-        snprintf(path, sizeof(path), ASSETS_BASE "levels/blaster.lv%d", world);
-        data = read_file_data(path, &data_size);
-    }
-    if (!data) {
-        cache[world] = 0;
-        return 0;
-    }
-    if (data_size != LEVEL_FILE_SIZE) {
-        free_file_data(data);
-        cache[world] = 0;
-        return 0;
-    }
-
-    n = 0;
-    for (off = 0; off + BRICK_COUNT <= data_size; off += BRICK_COUNT) {
-        if (data[off] == 0xFF) break;   /* cmp B [esi],-1 / je @@end */
+int level_count_buffer(const unsigned char *buf) {
+    int n = 0, off;
+    for (off = 0; off + BRICK_COUNT <= LEVEL_FILE_SIZE; off += BRICK_COUNT) {
+        if (buf[off] == 0xFF) break;   /* cmp B [esi],-1 / je @@end */
         n++;
     }
-    free_file_data(data);
-    cache[world] = n;
+    return n;
+}
+
+int level_count(int world) {
+    unsigned char *buf;
+    int n = 0;
+
+    if (world < 0 || world >= LEVEL_WORLDS) return 0;
+    if (s_count_cache[world] >= 0) return s_count_cache[world];
+
+    /* Same resolution as game_load_level: edited copy, then the shipped
+     * file (capitalised name, lowercase fallback). */
+    buf = (unsigned char *)malloc(LEVEL_FILE_SIZE);
+    if (!buf) return 0;
+    if (level_read_world(world, buf, 1) == 0) n = level_count_buffer(buf);
+    free(buf);
+    s_count_cache[world] = n;
     return n;
 }
 

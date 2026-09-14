@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(brickblaster VERSION 0.2.3 LANGUAGES C)
+project(brickblaster VERSION 0.3.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_definitions(BRICKBLASTER_VERSION="${PROJECT_VERSION}")
@@ -124,6 +124,8 @@ if(EMSCRIPTEN)
         # data/ ships blaster.cfg/.scr/.usr defaults; hiscore/settings writes
         # land in MEMFS (lost on reload — no IDBFS persistence wired yet).
         "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/data@data"
+        # Editor saves go to /persist, an IndexedDB mount (main.c).
+        "-lidbfs.js"
     )
 endif()
 
