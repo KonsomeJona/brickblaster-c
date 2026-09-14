@@ -29,7 +29,7 @@
         <li><b>24 bonus</b> : multi-balle, balle de fer, laser, raquette magnétique, fantôme, téléporteurs…</li>
         <li>Des <b>monstres</b> qui surgissent : à esquiver ou à détruire</li>
         <li><b>À deux</b>, en coopération ou en duel, sur un clavier ou deux manettes</li>
-        <li>L'<b>éditeur de niveaux</b> d'origine, et le mode démo avec sa raquette automatique</li>
+        <li>Un mode démo avec sa raquette automatique ; un <a href="#editeur">éditeur autonome disponible sur GitHub</a></li>
         <li>En français, anglais, allemand, espagnol, italien et portugais</li>
       </ul>
     </section>
@@ -41,10 +41,28 @@
       <img src="img/ecran-4.png" width="640" height="480" alt="Un niveau devant une Terre vue de l'espace" loading="lazy">
     </section>
 
+    <section id="editeur">
+      <h2>L'éditeur de niveaux</h2>
+      <p>Un projet autonome C/raylib reprend l'écran, le panneau, les sprites et les touches de l'éditeur de 1999. Il permet d'importer et d'exporter les mondes au format d'origine, de travailler sur un niveau seul et de le tester avant de revenir au dessin.</p>
+      <div class="ecrans">
+        <figure>
+          <img src="img/editeur-niveaux.png" width="1280" height="960" alt="Éditeur de niveaux avec le panneau original F1 à F12" loading="lazy">
+          <figcaption>Édition avec le panneau et les sprites d'origine.</figcaption>
+        </figure>
+        <figure>
+          <img src="img/editeur-test.png" width="1280" height="960" alt="Test du niveau dans le moteur C de Brick Blaster" loading="lazy">
+          <figcaption>Test intégré ; le dessin est conservé.</figcaption>
+        </figure>
+      </div>
+      <p><b>Éditeur 0.1.0 — programme séparé du jeu.</b> Sources C/raylib et assembleur, guide illustré et binaire Linux ARM64 sont disponibles sur GitHub. F11 importe, F12 sauvegarde un monde et Tab lance le test du niveau.</p>
+      <p><a href="https://github.com/KonsomeJona/brickblaster-editor/releases/latest">Télécharger l’éditeur</a> · <a href="https://github.com/KonsomeJona/brickblaster-editor#readme">Guide et sources</a> · <a href="https://github.com/KonsomeJona/brickblaster-editor/blob/main/reference/EDITOR.ASM">Éditeur assembleur original</a></p>
+      <p>Le panneau, les ressources et les routines ont fait l’objet de vérifications ciblées. Les dialogues, l’historique et le test isolé sont des extensions ; les limites de fidélité sont documentées dans le dépôt.</p>
+    </section>
+
     <section>
       <h2>L'édition de 1999</h2>
       <p>Brick Blaster sort le 5 octobre 1999 en CD-ROM, dans la collection à petit prix de <b>Média Pocket</b>, développé par Carapace (Softplace) et programmé par l'équipe de démomakers <b>Eclipse</b>. En 2024, son auteur Marc Radermacher confie les sources assembleur à david4599, qui les publie pour les préserver.</p>
-      <p>Ce portage en C et raylib reprend ces sources fonction par fonction : physique, bonus, niveaux et fichiers de scores sont identiques à l'octet près à ceux du jeu de 1999.</p>
+      <p>Ce portage en C et raylib reprend les sources assembleur et conserve les fichiers de niveaux d'origine. Les règles font l'objet de tests et de comparaisons avec le code de 1999 ; cela ne constitue pas une preuve d'équivalence complète du programme.</p>
     </section>
 
     <section class="compteur" aria-labelledby="titre-compteur">

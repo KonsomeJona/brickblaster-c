@@ -85,6 +85,8 @@ h2 {
   image-rendering: pixelated;
   border: 2px solid #2c3160;
 }
+.ecrans figure { margin: 0; }
+.ecrans figcaption { color: var(--chrome); font-size: .9rem; margin-top: 6px; }
 .compteur { text-align: center; }
 #visites {
   display: inline-block;

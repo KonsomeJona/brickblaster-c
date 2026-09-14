@@ -52,10 +52,43 @@ A polished Arkanoid-style brick breaker with:
 - **24 power-ups** (multi-ball, iron ball, laser, magnetic paddle, ghost, teleporters, bonus/malus, …)
 - **Monsters** that spawn periodically and must be dodged or destroyed
 - **2-player** coop and versus (duel) modes
-- **Level editor** to design your own levels
+- **[Separate level editor](https://github.com/KonsomeJona/brickblaster-editor)** to design and test your own levels
 - **Demo / attract mode** with AI paddle
 - UI localized in English, French, German, Spanish, Italian, Portuguese
   (in-game power-up labels stay in the original game config — FR / EN / ES)
+
+## Standalone level editor
+
+The [BrickBlaster level editor](https://github.com/KonsomeJona/brickblaster-editor)
+is a **separate C/raylib application**, with its own executable and built-in
+playtest engine. It includes the [original EDITOR.ASM source](https://github.com/KonsomeJona/brickblaster-editor/blob/main/reference/EDITOR.ASM),
+the converted C sources and the original graphics. The game does not need to
+be installed to run it.
+
+[Download the editor](https://github.com/KonsomeJona/brickblaster-editor/releases/latest)
+· [Full illustrated guide](https://github.com/KonsomeJona/brickblaster-editor#readme).
+Version 0.1.0 provides a tested **Linux ARM64** binary; other platforms can
+build from source and are not validated by that archive.
+
+![Original-style level editor](site/img/editeur-niveaux.png)
+![Playing a level inside the editor](site/img/editeur-test.png)
+
+1. Extract the editor archive and launch `brickblaster-editor`, keeping `assets/`
+   next to it. Use **F11** or drag and drop to import an existing world.
+2. Select bricks with **F1–F4 / F9** and colours with **F5–F8**. Left click draws,
+   right click erases; **Esc** opens the commands menu.
+3. Press **Tab**, then **Space**, to test the current level. **P** pauses,
+   **R** restarts and **Tab** returns to the unchanged drawing.
+4. **F12** saves the whole world (`.lv0/.lv1/.lv2`, 31,200 bytes); **Ctrl E**
+   exports one level (`.lvl`, 390 bytes). Enter the destination path and press
+   Enter. **PgUp/PgDn** select a level; **Ctrl Insert** appends one.
+
+World files preserve the original binary format. Individual `.lvl` files are
+an editor extension, and the main game's release does not expose a custom-level
+file picker. Use the editor's built-in test to play your changes immediately.
+The original layout, resources and routines have targeted parity checks;
+[documented extensions and limitations](https://github.com/KonsomeJona/brickblaster-editor/blob/main/FIDELITY.md)
+mean this is not a claim of complete equivalence with the 1999 executable.
 
 ## The 1999 retail edition
 
