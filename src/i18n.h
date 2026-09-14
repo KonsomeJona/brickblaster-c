@@ -66,6 +66,16 @@ typedef enum {
     /* Titles for each of the 7 menu screens (context line). */
     STR_M_TITLE_1, STR_M_TITLE_2, STR_M_TITLE_3, STR_M_TITLE_4,
     STR_M_TITLE_5, STR_M_TITLE_6, STR_M_TITLE_7,
+    /* Port additions: fourth world (FONTE menu label) and the in-game editor.
+     * STR_ED_* use raylib's default font (any case); STR_OPT_ED_* are 18-char
+     * FONTE banners for panel_info. */
+    STR_M_ATOLL,
+    STR_ED_TEST, STR_ED_WORLD, STR_ED_ERASER, STR_ED_UNDO, STR_ED_CLEAR,
+    STR_ED_RESET, STR_ED_MENU, STR_ED_LEVEL, STR_ED_EDITED, STR_ED_SHIPPED,
+    STR_ED_NEW_SLOT, STR_ED_HELP_DRAW, STR_ED_HELP_ERASE, STR_ED_HELP_TEST,
+    STR_ED_HELP_DROP, STR_ED_TEST_HINT, STR_ED_PAUSE_HINT,
+    STR_OPT_ED_CLEARED, STR_OPT_ED_IMPORTED, STR_OPT_ED_REFUSED,
+    STR_OPT_ED_RESTORED, STR_OPT_ED_SAVE_FAILED, STR_OPT_ED_SAVED,
     /* Count — must be last */
     STR_COUNT
 } StringId;

@@ -124,6 +124,8 @@ if(EMSCRIPTEN)
         # data/ ships blaster.cfg/.scr/.usr defaults; hiscore/settings writes
         # land in MEMFS (lost on reload — no IDBFS persistence wired yet).
         "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/data@data"
+        # Editor saves go to /persist, an IndexedDB mount (main.c).
+        "-lidbfs.js"
     )
 endif()
 
