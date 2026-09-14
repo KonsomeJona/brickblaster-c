@@ -103,3 +103,13 @@ void draw_canvas_to_screen(DrawContext *dc, Game *g);
  * the canvas before the blit.
  */
 void draw_frame(DrawContext *dc, Game *g);
+
+/*
+ * Pieces of the game renderer reused by the in-game editor, so that what is
+ * edited looks exactly like what is played.
+ *   draw_world_background — the background of level N of a world, drawn in
+ *                           whatever render target is active.
+ *   draw_brick_source     — sprite-sheet rectangle of an undamaged brick.
+ */
+void draw_world_background(DrawContext *dc, int world, int level_num);
+Rectangle draw_brick_source(unsigned char raw);

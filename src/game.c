@@ -600,31 +600,44 @@ void game_init(Game *g, Assets *assets, AudioState *audio, Difficulty diff, int 
  * MAIN.ASM:1001  mov eax,start_level → mov current_level,eax
  * MAIN.ASM:4906-4911  speed_level computation
  * -------------------------------------------------------------------------- */
+static void start_loaded_level(Game *g, int level_num);
+
 void game_load_level(Game *g, int level_num) {
-    char path[256];
     int i;
-    int load_rc;
 
     g->level_num = level_num;
 
-    /* Build path to level file.
-     * FILE.ASM:1195-1196  "mov eax,'.lv?'; mov al,world" — world char appended */
-    snprintf(path, sizeof(path), ASSETS_BASE "levels/Blaster.lv%d", g->world);
-
-    /* Load raw level data (390 brick bytes) */
-    load_rc = level_load(&g->current_level, path, level_num);
-    if (load_rc != 0) {
-        /* World 2 assets are lowercase in this repo (blaster.lv2). */
-        snprintf(path, sizeof(path), ASSETS_BASE "levels/blaster.lv%d", g->world);
-        load_rc = level_load(&g->current_level, path, level_num);
-    }
-    if (load_rc != 0) {
+    /* FILE.ASM:1195-1196  "mov eax,'.lv?'; mov al,world" — world char
+     * appended. level_load_world also resolves the lowercase blaster.lv2
+     * and the player's edited copy of the world. */
+    if (level_load_world(&g->current_level, g->world, level_num) != 0) {
         /* Level load failed — zero all bricks, continue with empty level */
         for (i = 0; i < BRICK_COUNT; i++) {
             brick_init(&g->bricks[i], i, ABSENTE);
         }
         return;
     }
+    start_loaded_level(g, level_num);
+}
+
+/* Editor test run: same setup as game_load_level, bricks from memory. */
+void game_load_level_bricks(Game *g, int level_num, const unsigned char *bricks) {
+    int i;
+
+    g->level_num = level_num;
+    memcpy(g->current_level.bricks, bricks, BRICK_COUNT);
+    g->current_level.cols  = BRICK_COLS;
+    g->current_level.rows  = BRICK_ROWS;
+    g->current_level.world = g->world;
+    g->current_level.brick_count = 0;
+    for (i = 0; i < BRICK_COUNT; i++)
+        if (bricks[i] != ABSENTE && bricks[i] != INVALIDE)
+            g->current_level.brick_count++;
+    start_loaded_level(g, level_num);
+}
+
+static void start_loaded_level(Game *g, int level_num) {
+    int i;
 
     /* Initialise Brick structs from raw bytes.
      * MAIN.ASM:4882-4883  screen XY computed from col/row */
