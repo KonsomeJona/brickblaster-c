@@ -19,6 +19,46 @@ _nothing yet_
 
 ---
 
+## [0.3.0] — 2026-09-14
+
+The editor becomes part of the game, and a fourth world fills the slot the
+1999 menu left blank.
+
+### Added
+
+- **Atoll**, a fourth world in slot *c* of the world menu (blank since 1999:
+  its `@@coin_coin` branch is commented out, `MAIN.ASM:495-501`). 8 levels
+  designed with Claude Fable 5.1, from *the arch* to *kraken*, kept as a
+  readable grid in `tools/levels/atoll.txt` and compiled by `tools/txt2lv.py`
+  into `assets/levels/Blaster.lv3`. Backgrounds `sprites/02_*.png` are the
+  Space set regraded as deep water; the world plays `credit.mod`.
+- **In-game level editor**, reachable from the main menu (**E**, or the
+  *editor* button) and from pause (**E** edits the level being played). It
+  uses the 1999 editor screen (panel sprite, arrows, cursor, F-key dispatch)
+  over the world's real background and bricks, plus a column of buttons for
+  mouse and touch: test, levels, world, eraser, undo, clear, reset, menu.
+- **Test run**: Tab plays the grid in the real game; clearing it, losing it,
+  Tab or Esc return to the editor with the grid untouched. No hiscore entry.
+- **Edited worlds are played**: every change is saved at once to
+  `data/custom.lv<world>` (IndexedDB `/persist` on the web), and that copy
+  replaces the shipped world for the campaign, the level count and the demo.
+  Reset restores a shipped level; a world back to its shipped bytes drops its
+  copy. Drawing after the last level appends one; an emptied last level goes.
+- **Standalone editor files open in the game**: drop a `.lv0/.lv1/.lv3` world
+  or a `.lvl` level on the window, or pass it on the command line.
+- `bb_tests`: the Atoll world is checked brick by brick (brush bytes, rows,
+  every breakable reachable), and edited copies, trimming and the in-memory
+  test run have their own cases.
+
+### Changed
+
+- The old in-game editor stub (flat rectangles, `data/custom_<w>.lv<d>` files
+  nothing read, HP up to 31 corrupting the type bits) is replaced by the above.
+- `level_count`, `game_load_level` and the background / palette choice go
+  through `level.c` world helpers instead of `world & 1`.
+
+---
+
 ## [0.2.3] — 2026-08-28
 
 Web responsiveness fix, plus the historical record of the 1999 release.
