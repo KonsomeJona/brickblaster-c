@@ -18,6 +18,8 @@
 #include "../src/powerup.h"
 #include "../src/monster.h"
 #include "../src/collision.h"
+#include "../src/brick.h"
+#include "../src/level.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -346,6 +348,137 @@ static void t_life_lost_serves_both_players_again(void) {
     CHECK(g.balls[1].owner == 1);
 }
 
+/* ------------------------------------------------------------------------
+ * Port extensions: the atoll world, edited copies, the editor's test run.
+ * ------------------------------------------------------------------------ */
+
+/* Flood fill from the open bottom of the board through every cell that is
+ * not indestructible or a teleporter (breakables open up as they break):
+ * each N/M/T brick must be reached. */
+static int breakables_reachable(const unsigned char *lv) {
+    unsigned char seen[BRICK_COUNT] = { 0 };
+    int stack[BRICK_COUNT], top = 0, i;
+
+    for (i = 25 * BRICK_COLS; i < 26 * BRICK_COLS; i++) {
+        int t = lv[i] & 0x38;
+        if (lv[i] && (t == 0x08 || t == 0x18)) continue;
+        seen[i] = 1; stack[top++] = i;
+    }
+    while (top) {
+        int c = stack[--top], r = c / BRICK_COLS, k = c % BRICK_COLS, d;
+        const int nb[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
+        for (d = 0; d < 4; d++) {
+            int rr = r + nb[d][0], kk = k + nb[d][1], n, t;
+            if (rr < 0 || rr > 25 || kk < 0 || kk >= BRICK_COLS) continue;
+            n = rr * BRICK_COLS + kk;
+            t = lv[n] & 0x38;
+            if (seen[n] || (lv[n] && (t == 0x08 || t == 0x18))) continue;
+            seen[n] = 1; stack[top++] = n;
+        }
+    }
+    for (i = 0; i < BRICK_COUNT; i++) {
+        int t = lv[i] & 0x38;
+        if (lv[i] && t != 0x08 && t != 0x18 && !seen[i]) return 0;
+    }
+    return 1;
+}
+
+static void t_atoll_world_is_sound(void) {
+    begin("atoll: 8 levels, EDITOR.ASM brush bytes only, every breakable reachable");
+    static unsigned char buf[LEVEL_FILE_SIZE];
+    int L, i, c, b;
+
+    CHECK(level_read_world(WORLD_ATOLL, buf, 0) == 0);
+    CHECK(level_count_buffer(buf) == 8);
+    for (L = 0; L < 8; L++) {
+        const unsigned char *lv = buf + L * BRICK_COUNT;
+        int ok_bytes = 1, ok_rows = 1, breakables = 0;
+        for (i = 0; i < BRICK_COUNT; i++) {
+            int legal = (lv[i] == 0);
+            for (b = 0; b < 5; b++)
+                for (c = 0; c < 4; c++)
+                    if (lv[i] == level_brush_code(b, c)) legal = 1;
+            if (!legal) ok_bytes = 0;
+            if (lv[i] && (i < 2 * BRICK_COLS || i >= 26 * BRICK_COLS)) ok_rows = 0;
+            if (lv[i] && (lv[i] & 0x38) != 0x08 && (lv[i] & 0x38) != 0x18) breakables++;
+        }
+        CHECK(lv[0] != 0xFF);
+        CHECK(ok_bytes);
+        CHECK(ok_rows);
+        CHECK(breakables >= 20);
+        CHECK(breakables_reachable(lv));
+    }
+    /* Past the last level: 0xFF slots, as in the 1999 files. */
+    CHECK(buf[8 * BRICK_COUNT] == 0xFF && buf[LEVEL_FILE_SIZE - 1] == 0xFF);
+}
+
+static void t_edited_copy_replaces_world(void) {
+    begin("editor: the edited copy of a world is what the game plays; removing it restores the shipped one");
+    static unsigned char buf[LEVEL_FILE_SIZE];
+    int shipped;
+    Game g;
+
+    level_set_user_dir("bb_test_user/");
+    CHECK(level_remove_user_world(0) == 0);
+    shipped = level_count(0);
+    CHECK(shipped == 40);
+    CHECK(level_read_world(0, buf, 1) == 0);
+
+    buf[2 * BRICK_COLS] = level_brush_code(1, 2);                 /* level 1 edited */
+    memset(buf + shipped * BRICK_COUNT, 0, BRICK_COUNT);          /* level 41 appended */
+    buf[shipped * BRICK_COUNT + 3 * BRICK_COLS + 6] = level_brush_code(0, 3);
+    CHECK(level_write_user_world(0, buf) == 0);
+    CHECK(level_count(0) == shipped + 1);
+
+    game_init(&g, NULL, NULL, DIFFICULTY_EASY, 0);
+    g.world = 0;
+    game_load_level(&g, 1);
+    CHECK(g.current_level.bricks[2 * BRICK_COLS] == level_brush_code(1, 2));
+    game_load_level(&g, shipped + 1);
+    CHECK(g.bricks[3 * BRICK_COLS + 6].active);
+    CHECK(!game_level_complete(&g));
+
+    CHECK(level_remove_user_world(0) == 0);
+    CHECK(level_count(0) == shipped);
+    level_set_user_dir("data/");
+    remove("bb_test_user");
+}
+
+static void t_trim_drops_emptied_last_levels(void) {
+    begin("editor: an emptied last level turns back into a 0xFF slot");
+    static unsigned char buf[LEVEL_FILE_SIZE];
+    memset(buf, 0xFF, sizeof(buf));
+    memset(buf, 0, 3 * BRICK_COUNT);
+    buf[0] = level_brush_code(0, 0);                             /* level 1 only */
+    CHECK(level_count_buffer(buf) == 3);
+    level_trim_world(buf);
+    CHECK(level_count_buffer(buf) == 1);
+    memset(buf, 0, BRICK_COUNT);                                 /* all empty */
+    level_trim_world(buf);
+    CHECK(level_count_buffer(buf) == 1);                         /* one level stays */
+}
+
+static void t_editor_test_plays_memory_grid(void) {
+    begin("editor test run: game_load_level_bricks plays the grid in memory");
+    unsigned char grid[BRICK_COUNT];
+    Game g;
+    int n = 2 * BRICK_COLS + 6;
+
+    memset(grid, 0, sizeof(grid));
+    grid[n] = level_brush_code(0, 3);
+    grid[n + BRICK_COLS] = level_brush_code(2, 1);
+    game_init(&g, NULL, NULL, DIFFICULTY_MEDIUM, 0);
+    g.world = WORLD_ATOLL;
+    game_load_level_bricks(&g, 5, grid);
+    CHECK(g.level_num == 5);
+    CHECK(g.current_level.brick_count == 2);
+    CHECK(g.bricks[n].active && g.bricks[n].hp == 1);
+    CHECK(g.bricks[n + BRICK_COLS].type == BRICK_INDESTRUCTIBLE);
+    CHECK(!game_level_complete(&g));
+    brick_hit(&g.bricks[n], 1);
+    CHECK(game_level_complete(&g));   /* the indestructible one does not count */
+}
+
 int main(void) {
     printf("BrickBlaster — instrumental parity tests\n\n");
 
@@ -364,6 +497,10 @@ int main(void) {
     t_duel_counts_balls_per_player();
     t_bonus_life_steps_by_the_cfg_value();
     t_life_lost_serves_both_players_again();
+    t_atoll_world_is_sound();
+    t_edited_copy_replaces_world();
+    t_trim_drops_emptied_last_levels();
+    t_editor_test_plays_memory_grid();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
