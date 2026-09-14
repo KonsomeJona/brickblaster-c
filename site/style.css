@@ -1,0 +1,123 @@
+/* Couleurs de la pochette Média Pocket de 1999 : espace noir, cadre rouge-orangé,
+   bandeau rouge à lettres jaunes, pastille jaune ; et le rose des chiffres du score. */
+:root {
+  --noir: #06060b;
+  --rouge: #e2401c;
+  --rouge-fonce: #b52a10;
+  --jaune: #ffd200;
+  --chrome: #cfd4e0;
+  --texte: #e9ebf2;
+  --rose: #f58fbf;
+}
+* { box-sizing: border-box; }
+html { background: var(--noir); }
+body {
+  margin: 0;
+  padding-block: 24px;
+  padding-inline: 16px;
+  color: var(--texte);
+  font: 17px/1.55 "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  /* Un ciel étoilé sans image : quelques étoiles en dégradés répétés. */
+  background:
+    radial-gradient(1px 1px at 20px 30px, #fff9, transparent),
+    radial-gradient(1px 1px at 140px 80px, #fff7, transparent),
+    radial-gradient(1.5px 1.5px at 90px 150px, #fffb, transparent),
+    radial-gradient(1px 1px at 200px 190px, #fff6, transparent),
+    radial-gradient(ellipse at 80% 0%, #1b2350 0%, transparent 55%),
+    var(--noir);
+  background-size: 230px 230px, 230px 230px, 230px 230px, 230px 230px, 100% 100%, auto;
+}
+a { color: var(--jaune); }
+.pochette {
+  position: relative;
+  max-width: 900px;
+  margin: 0 auto;
+  border: 8px solid var(--rouge);
+  background: #0b0b14e6;
+}
+.pastille {
+  position: absolute;
+  top: -14px;
+  right: -10px;
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--jaune);
+  color: #000;
+  font: italic 900 15px/1.2 "Arial Black", Impact, sans-serif;
+  text-align: center;
+  transform: rotate(8deg);
+  box-shadow: 3px 3px 0 #000;
+}
+header { padding: 40px 28px 12px; text-align: center; }
+h1 { margin: 0; }
+h1 img { max-width: 100%; height: auto; }
+.accroche { font-size: 1.15rem; color: var(--chrome); margin: 14px 0 24px; }
+.boutons { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.bouton {
+  display: inline-block;
+  padding: 11px 18px;
+  border: 2px solid var(--chrome);
+  color: var(--texte);
+  text-decoration: none;
+  font-weight: bold;
+}
+.bouton:hover, .bouton:focus-visible { border-color: var(--jaune); color: var(--jaune); }
+.bouton.principal {
+  background: var(--rouge);
+  border-color: var(--jaune);
+  color: var(--jaune);
+  font: italic 900 1.1rem "Arial Black", Impact, sans-serif;
+}
+.bouton.principal:hover, .bouton.principal:focus-visible { background: var(--rouge-fonce); }
+main { padding: 8px 28px 20px; }
+h2 {
+  color: var(--jaune);
+  font: italic 900 1.6rem "Arial Black", Impact, sans-serif;
+  text-shadow: 2px 2px 0 #000;
+  margin: 28px 0 10px;
+}
+.liste { padding-left: 1.2em; }
+.liste li::marker { color: var(--rouge); content: "▶ "; }
+.ecrans { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 28px; }
+.ecrans img {
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  border: 2px solid #2c3160;
+}
+.compteur { text-align: center; }
+#visites {
+  display: inline-block;
+  padding: 6px 14px;
+  background: #000;
+  border: 3px solid var(--rouge);
+  color: var(--rose);
+  font: bold 2.2rem/1 "Courier New", monospace;
+  letter-spacing: .2em;
+  text-shadow: 0 0 8px #f58fbf99;
+}
+#visites-note { color: var(--chrome); font-size: .9rem; }
+footer {
+  padding: 18px 28px 8px;
+  border-top: 2px solid #2c3160;
+  color: var(--chrome);
+  font-size: .9rem;
+}
+.bandeau {
+  margin: 0;
+  padding: 10px;
+  background: var(--rouge);
+  color: var(--jaune);
+  text-align: center;
+  font: italic 900 1rem "Arial Black", Impact, sans-serif;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  .ecrans { grid-template-columns: 1fr; }
+  /* The sticker would cover the end of the logo: the header starts below it. */
+  header { padding: 64px 14px 8px; }
+  main, footer { padding-inline: 14px; }
+  .pastille { right: -6px; font-size: 13px; }
+}

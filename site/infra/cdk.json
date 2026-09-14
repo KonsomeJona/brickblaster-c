@@ -1,0 +1,4 @@
+{
+    "app": "node node_modules/ts-node/dist/bin.js bin/app.ts",
+    "output": "/tmp/brickblaster-site-cdk.out"
+}

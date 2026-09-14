@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brick Blaster — le casse-briques de 1999</title>
+<meta name="description" content="Brick Blaster, le casse-briques sorti en 1999 chez Média Pocket, reconstruit depuis son code assembleur d'origine. Gratuit, jouable dans le navigateur, code source ouvert.">
+<link rel="icon" type="image/png" href="img/icone.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="pochette">
+  <p class="pastille">Gratuit<br>et open source</p>
+  <header>
+    <h1><img src="img/logo.png" width="789" height="118" alt="Brick Blaster"></h1>
+    <p class="accroche">Le casse-briques de 1999, reconstruit à partir de son code assembleur d'origine.</p>
+    <nav class="boutons" aria-label="Jouer et télécharger">
+      <a class="bouton principal" href="https://konsomejona.itch.io/brickblaster">▶ Jouer sur itch.io</a>
+      <a class="bouton" href="https://github.com/KonsomeJona/brickblaster-c">Code source sur GitHub</a>
+      <a class="bouton" href="https://github.com/KonsomeJona/brickblaster-c/releases/latest">Télécharger · Windows, macOS, Linux</a>
+    </nav>
+  </header>
+
+  <main>
+    <section>
+      <h2>Le jeu</h2>
+      <ul class="liste">
+        <li><b>80 niveaux</b> sur deux mondes, l'Espace et l'Arcade</li>
+        <li><b>24 bonus</b> : multi-balle, balle de fer, laser, raquette magnétique, fantôme, téléporteurs…</li>
+        <li>Des <b>monstres</b> qui surgissent : à esquiver ou à détruire</li>
+        <li><b>À deux</b>, en coopération ou en duel, sur un clavier ou deux manettes</li>
+        <li>L'<b>éditeur de niveaux</b> d'origine, et le mode démo avec sa raquette automatique</li>
+        <li>En français, anglais, allemand, espagnol, italien et portugais</li>
+      </ul>
+    </section>
+
+    <section class="ecrans" aria-label="Captures d'écran">
+      <img src="img/ecran-1.png" width="640" height="480" alt="Un niveau du monde Espace, en mode démo" loading="lazy">
+      <img src="img/ecran-2.png" width="640" height="480" alt="Des colonnes de briques vertes au-dessus d'une planète" loading="lazy">
+      <img src="img/ecran-3.png" width="640" height="480" alt="Un niveau aux briques colorées, bonus magnétique actif" loading="lazy">
+      <img src="img/ecran-4.png" width="640" height="480" alt="Un niveau devant une Terre vue de l'espace" loading="lazy">
+    </section>
+
+    <section>
+      <h2>L'édition de 1999</h2>
+      <p>Brick Blaster sort le 5 octobre 1999 en CD-ROM, dans la collection à petit prix de <b>Média Pocket</b>, développé par Carapace (Softplace) et programmé par l'équipe de démomakers <b>Eclipse</b>. En 2024, son auteur Marc Radermacher confie les sources assembleur à david4599, qui les publie pour les préserver.</p>
+      <p>Ce portage en C et raylib reprend ces sources fonction par fonction : physique, bonus, niveaux et fichiers de scores sont identiques à l'octet près à ceux du jeu de 1999.</p>
+    </section>
+
+    <section class="compteur" aria-labelledby="titre-compteur">
+      <h2 id="titre-compteur">Visiteurs</h2>
+      <output id="visites" aria-live="polite">------</output>
+      <p id="visites-note">Un par navigateur, depuis l'ouverture du site.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p><b>Jeu original (1999)</b> — Marc Radermacher (code), Christophe Résigné (musique), Frédéric Box (graphismes), Régis Vidal (WinEOS), équipe Eclipse. Édité par Média Pocket.</p>
+    <p><b>Portage C/raylib (2026)</b> — Jonathan Odul. Licence GNU GPL v3. Sources d'origine : <a href="https://github.com/david4599/BrickBlaster">david4599/BrickBlaster</a>.</p>
+    <p><a href="https://konsomejona.itch.io/brickblaster">itch.io</a> · <a href="https://github.com/KonsomeJona/brickblaster-c">GitHub</a> · <a href="https://www.takohi.me/">takohi.me</a> · <a href="mailto:contact@takohi.me">contact@takohi.me</a></p>
+  </footer>
+  <p class="bandeau">Version complète — jouable gratuitement dans le navigateur</p>
+</div>
+<script src="compteur.js"></script>
+</body>
+</html>

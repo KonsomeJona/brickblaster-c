@@ -1,0 +1,19 @@
+{
+    "name": "brickblaster-site-infra",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "synth": "cdk synth",
+        "deploy": "cdk deploy"
+    },
+    "dependencies": {
+        "aws-cdk-lib": "^2.170.0",
+        "constructs": "^10.4.2"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "aws-cdk": "^2.1112.0",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.7.0"
+    }
+}

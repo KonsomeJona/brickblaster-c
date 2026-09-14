@@ -1,0 +1,3 @@
+# Installed and synthesized on D: (builds never go to E:); node_modules is a symlink.
+node_modules
+cdk.out
