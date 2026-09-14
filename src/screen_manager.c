@@ -40,7 +40,10 @@ void screen_update_music(ScreenState *state, MusicManager *music) {
         case STATE_PLAYING:
         case STATE_READY_TO_PLAY:
         case STATE_READY_TO_PLAY_AGAIN:
-            desired = (state->world == 0) ? MUSIC_THELAST : MUSIC_LODE;
+            /* The port's atoll world borrows the credits module, the only
+             * track the campaign never plays. */
+            desired = (state->world == 0) ? MUSIC_THELAST
+                    : (state->world == 3) ? MUSIC_CREDIT : MUSIC_LODE;
             break;
         case STATE_HISCORE:
         case STATE_FINAL:
