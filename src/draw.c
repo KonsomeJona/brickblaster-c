@@ -138,7 +138,8 @@ static const Rectangle SR_BRICK_REFLET     = { 585, 97, 32, 16 };
 #define BRICK_TRANSP_BASE_X  198
 /* Blaster.inc:347  brique_teleport_o= 231+(screen_x*095) */
 #define BRICK_TELE_BASE_X    231
-/* Multi-hit base: Blaster.inc:351  brique_multi_o = 033+(screen_x*095) */
+/* Blaster.inc:351  brique_multi_o = 033+(screen_x*095) — the level editor's
+ * multi-hit marker (vertical band). Never used in play; see get_brick_rect. */
 #define BRICK_MULTI_BASE_X   33
 
 /* --- Powerups (26x24) --- */
@@ -293,15 +294,18 @@ static Rectangle get_brick_rect(const Brick *b) {
         break;
 
     default:
-        /* BRICK_NORMAL: classic (HP=1) vs multi-hit (HP>1) use different base sprites.
-         * Blaster.inc:345  brique_classic_o = 066+(screen_x*095) — single-hit bricks
-         * Blaster.inc:351  brique_multi_o   = 033+(screen_x*095) — multi-hit bricks */
-        {
-            /* Same capped value as the damage state below — equivalent here
-             * (both 7 and the capped 4 are > 1) but reading `raw` twice with
-             * two different meanings is how the damage bug got in. */
-            base_x = (b->hp_initial > 1) ? BRICK_MULTI_BASE_X : BRICK_BASE_X;
-        }
+        /* BRICK_NORMAL: every normal brick starts on brique_classic_o in play,
+         * multi-hit ones included. draw_brique only swaps in brique_multi_o
+         * (the variant with the vertical band) for the level EDITOR:
+         *     cmp game_mode,EDIT / jne @@d
+         *     cmp esi,brique_classic_o / jne @@d
+         *     mov esi,brique_multi_o                (MAIN.ASM:4972-4977)
+         * Each hit then adds next_brique to the stored sprite address
+         * (MAIN.ASM:4002), i.e. classic -> 3 crack stages, which the damage
+         * offset below reproduces. The port used brique_multi_o in play, so
+         * multi-hit bricks showed the editor band and ran one frame behind.
+         * (The port's editor draws its own previews and never comes here.) */
+        base_x = BRICK_BASE_X;
         base_y = BRICK_BASE_Y;
         break;
     }
@@ -514,6 +518,18 @@ static void draw_bricks(DrawContext *dc, const Game *g) {
 
         Rectangle src = get_brick_rect(b);
 
+        /* Teleporter animation — MAIN.ASM:6149-6200 draw_telepod. Every
+         * DELAI_TELEPOD frames each teleporteuse cell is redrawn at
+         * brique_teleport_o + current_telepod, and current_telepod steps by
+         * next_brique (33 px) through 6 frames before wrapping to 0. The port
+         * only ever drew frame 0, so the doors sat still. g->frame only
+         * advances inside game_update, so the cycle freezes on pause as the
+         * ASM's does (draw_telepod is called from the play loops only). */
+        if (b->type == BRICK_TELEPORTER) {
+            int tframe = (g->frame / DELAI_TELEPOD) % 6;   /* next_brique*6 */
+            src.x += (float)(tframe * BRICK_DAMAGE_STRIDE);
+        }
+
         /* Indestructible brick reflet (hit-triggered ripple).
          * MAIN.ASM:4058-4061 stamps brique_reflet_o+next_reflet*nbs_reflet
          * on ball impact; MAIN.ASM:6220-6240 decrements the sprite offset
@@ -713,20 +729,38 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* Paddle LED animation. The paddle IS an animated sprite in the ASM:
+ * _Init_Cursor_player_1/2 (MAIN.ASM:1777-1781, 1828-1832) give the normal
+ * ship sprite_nbs_shape=4, shape_speed=5, next_shape=0; the large ship
+ * (MAIN.ASM:2566-2570, 2665-2669) 2 frames at speed 10, the small ship
+ * (MAIN.ASM:2616-2620, 2718-2722) 2 frames at speed 8. Refresh_Sprites
+ * (DRAW.ASM:388-414) steps one frame every speed+1 ticks, each frame
+ * sprite_size_x + next_shape further right on the sheet. On the normal
+ * ship the 4 frames light the middle, left, middle, right LED — the
+ * "K2000" sweep; the large ship swaps its LED pairs, the small one blinks. */
+static Rectangle paddle_anim_frame(Rectangle r, PaddleSize size, int tick) {
+    int nbs, speed;
+    switch (size) {
+    case PADDLE_SIZE_LARGE: nbs = 2; speed = 10; break;
+    case PADDLE_SIZE_SMALL: nbs = 2; speed =  8; break;
+    default:                nbs = 4; speed =  5; break;
+    }
+    if (tick < 0) tick = 0;
+    r.x += (float)(((tick / (speed + 1)) % nbs) * (int)r.width);
+    return r;
+}
+
 /* Draw a single paddle with all overlays — exploded sprite while
  * explo_timer is counting, otherwise normal paddle + cannon flash +
  * optional telepod overlay on top. */
-static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
+static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2, int tick) {
     if (p->explo_timer > 0) {
         draw_paddle_explosion(dc, p, p2);
         return;
     }
-    Rectangle src = get_paddle_rect(p, p2);
+    Rectangle src = paddle_anim_frame(get_paddle_rect(p, p2), p->size, tick);
     Vector2 pos   = { (float)p->x, (float)p->y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-    /* (Non-ASM "KITT" LED scanner removed — DRAW.ASM draws the paddle
-     * as a single static sprite; same fidelity rule as the P0-ASM-6
-     * screen-shake/red-flash purge.) */
     draw_cannon_flash(dc, p, p2);
     if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
 }
@@ -734,10 +768,10 @@ static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
 static void draw_paddle(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
 
-    draw_one_paddle(dc, &g->paddle, 0);
+    draw_one_paddle(dc, &g->paddle, 0, g->frame);
     /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68). */
     if (g->game_mode > 0) {
-        draw_one_paddle(dc, &g->paddle_2, 1);
+        draw_one_paddle(dc, &g->paddle_2, 1, g->frame);
     }
 }
 
@@ -764,9 +798,13 @@ static void draw_projectiles(DrawContext *dc, const Game *g) {
          * spawn point (game.c places p->x with vaisseau_tir's 12px width
          * in mind; the real projectile is 3 or 8 wide). */
         Rectangle src = p->is_big ? SR_PROJ_BIG : SR_PROJ_MINI;
-        float pad_w   = p->is_big ? 13.0f : 12.0f;   /* cannon sprite width */
-        float offset  = (pad_w - src.width) * 0.5f;
-        Vector2 pos   = { (float)p->x + offset, (float)p->y };
+        int pad_w     = p->is_big ? 13 : 12;         /* cannon sprite width */
+        /* Whole pixels only. (13-8)/2 = 2.5 put the big shot on a half-pixel
+         * x, and with nearest-neighbour sampling some GPUs then read texel
+         * column 443 of the sheet — the solid orange frame border just left
+         * of shoot_o — drawing a 1x42 orange line beside the rocket. */
+        int offset    = (pad_w - (int)src.width) / 2;
+        Vector2 pos   = { (float)(p->x + offset), (float)p->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
     }
 }

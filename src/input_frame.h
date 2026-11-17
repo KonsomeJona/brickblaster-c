@@ -46,6 +46,7 @@ typedef struct {
 
     /* Dev */
     int   dev_f9_pressed;   /* 1 = F9 pressed (dev test toggle) */
+    int   teleport_pressed; /* 1 = T pressed: jump the ball(s) out of a loop (port addition) */
 
     /* Player 2 input (multiplayer).
      * Source chosen in menu 3 (ctrl player 2): computer/keyboard/joystick.

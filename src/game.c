@@ -2329,6 +2329,22 @@ void game_update(Game *g, const FrameInput *input) {
         }
     }
 
+    /* Port addition (not in the 1999 game): T jumps every free ball to a
+     * random spot, exactly like the telepod bonus does, so a ball stuck in
+     * a repeating loop can be knocked out of it. Speed and direction are
+     * kept. Balls held by a magnetic paddle are left alone. */
+    if (input->teleport_pressed && g->state == STATE_PLAYING && !g->demo_active) {
+        int tj, any = 0;
+        for (tj = 0; tj < g->ball_count; tj++) {
+            Ball *tb = &g->balls[tj];
+            if (!tb->active || tb->is_magnetic || tb->telepod_timer > 0) continue;
+            teleport_ball_random(g, tb);
+            tb->telepod_timer = DELAI_TELEPOD;
+            any = 1;
+        }
+        if (any && g->audio) audio_play(g->audio, SFX_TELEPOD);
+    }
+
     /* =======================================================================
      * STEP 2b: Paddle shooting — fire projectiles when gun is active.
      * MAIN.ASM:1083  call refresh_shoot / detect_shoot_player_1
@@ -2754,6 +2770,27 @@ void game_update(Game *g, const FrameInput *input) {
             }
         }
         (void)score_delta;  /* unused — kept for minimal-diff compat */
+
+        /* Iron ball through a teleporter. detect_brique jumps to
+         * @@teleportation for ANY sprite touching a teleporteuse cell
+         * (MAIN.ASM:4052-4053, 4068-4073) — only the BOUNCE is gated on
+         * sprite_rebond. check_brick_at_point reports that touch for an iron
+         * ball in hit_indices but returns "no bounce", so bc.hit stays 0 and
+         * the teleporter branch above never ran: iron balls flew straight
+         * through. Done here, after the bricks it smashed this frame have
+         * been scored. */
+        if (g->balls[i].is_iron) {
+            int ti;
+            for (ti = 0; ti < bc.hit_count; ti++) {
+                int tidx = bc.hit_indices[ti];
+                if (tidx < 0 || tidx >= BRICK_COUNT) continue;
+                if (g->bricks[tidx].type != BRICK_TELEPORTER) continue;
+                teleport_ball_random(g, &g->balls[i]);
+                g->balls[i].telepod_timer = DELAI_TELEPOD;
+                if (g->audio) audio_play(g->audio, SFX_TELEPOD);
+                break;
+            }
+        }
 
         /* Move ball forward by velocity.
          * MAIN.ASM:3250-3256  pos_x += sens_x; pos_y += sens_y */
