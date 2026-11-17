@@ -113,6 +113,10 @@ void frame_input_poll(FrameInput *out, int drag_enabled, int tilt_enabled,
      * to break out of a trajectory that keeps looping. */
     out->teleport_pressed = IsKeyPressed(KEY_T);
 
+    /* Not in the 1999 game either: N does what catching the next-level
+     * bonus does. */
+    out->next_level_pressed = IsKeyPressed(KEY_N);
+
     /* === Keyboard: directional ===
      * A/D are a port convenience for P1 (the 1999 game drove cursor_1 from
      * the mouse only — MOUSE.ASM Refresh_Mouse). They collide with P2's

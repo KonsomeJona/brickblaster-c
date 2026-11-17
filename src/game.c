@@ -2358,6 +2358,19 @@ void game_update(Game *g, const FrameInput *input) {
         }
     }
 
+    /* Port addition (not in the 1999 game): N behaves exactly as catching
+     * the next-level bonus — the pickup's iff_option (MAIN.ASM:5708), then
+     * the bonus handler, which wipes the option slots, plays iff_next_level
+     * and switches to NEW_PLAY; the main loop then loads the next level and
+     * shows "ready ?". No +20 pickup points: nothing was caught. The rest of
+     * this frame is skipped, like the level-complete exit in STEP 7, so a
+     * ball cannot be lost after the level has already been left. */
+    if (input->next_level_pressed && g->state == STATE_PLAYING && !g->demo_active) {
+        if (g->audio) audio_play(g->audio, SFX_POWERUP_COLLECT);
+        apply_powerup(g, POWERUP_NEXT_LEVEL, 0);
+        return;
+    }
+
     /* Port addition (not in the 1999 game): T jumps every free ball to a
      * random spot, exactly like the telepod bonus does, so a ball stuck in
      * a repeating loop can be knocked out of it. Speed and direction are
