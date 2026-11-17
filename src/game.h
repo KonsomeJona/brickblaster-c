@@ -192,10 +192,10 @@ typedef struct {
     /* -------------------------------------------------------------------
      * Entities
      * MAIN.ASM:7066-7085  Ball_1..Ball_20 — 20 active ball slots total.
-     * BALL_MAX (19) = nbs_ball_max = max *extra* balls spawnable above slot 0.
-     * Array size = BALL_MAX + 1 = 20, indices 0..BALL_MAX.
+     * The port sizes the array for BALLS_CAPACITY and enforces the
+     * configurable limit (Blaster.cfg Max_Balls, default 20) at spawn time.
      * ------------------------------------------------------------------- */
-    Ball         balls[BALL_MAX + 1];
+    Ball         balls[BALLS_CAPACITY];
     int          ball_count;    /* number of active (in-play) ball slots */
 
     Paddle       paddle;
@@ -311,6 +311,7 @@ typedef struct {
     int          cfg_speed_delai;      /* Freq_Change_Speed  FILE.ASM:959 */
     int          cfg_speed_start[3];   /* Start_Speed    FILE.ASM:993-997 */
     int          cfg_bonus_extra_life; /* Extra_Life     FILE.ASM:942     */
+    int          cfg_max_balls;        /* Max_Balls (port addition); 0 = BALLS_DEFAULT_MAX */
 
     /* F6-01: Per-powerup per-difficulty spawn frequencies, injected from
      * Blaster.cfg Freq_Option_* (FILE.ASM:962-973 + 1143 struc_options
@@ -443,6 +444,11 @@ void game_set_change_speed(Game *g, const int cs[3]);
  * re-seeds the life count and bonus threshold that game_init has just set. */
 void game_set_cfg_scalars(Game *g, int nbs_ball_start, int speed_delai,
                           const int speed_start[3], int bonus_extra_life);
+
+/* Blaster.cfg Max_Balls (port addition): how many balls may be in play at
+ * once. 0 keeps the 1999 limit of 20; other values are clamped to
+ * 1..BALLS_CAPACITY. Call it right after game_init, like the setter above. */
+void game_set_max_balls(Game *g, int max_balls);
 
 /* F6-01: inject per-powerup per-difficulty spawn frequencies from Blaster.cfg
  * Freq_Option_* (FILE.ASM:962-973). `freq` is indexed [PowerupType][0=easy,

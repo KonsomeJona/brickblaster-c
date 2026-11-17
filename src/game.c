@@ -379,6 +379,20 @@ static int bonus_extra_life_of(const Game *g) {
                                               : BONUS_EXTRA_LIFE;
 }
 
+/* Port addition: Blaster.cfg Max_Balls. 0 keeps the 1999 limit of 20 ball
+ * sprites (Ball_1..Ball_20, MAIN.ASM:7066-7085). Stored clamped so readers
+ * never index past the balls[] array. */
+void game_set_max_balls(Game *g, int max_balls) {
+    if (!g) return;
+    if (max_balls <= 0)             max_balls = 0;            /* default */
+    if (max_balls > BALLS_CAPACITY) max_balls = BALLS_CAPACITY;
+    g->cfg_max_balls = max_balls;
+}
+
+static int max_balls_of(const Game *g) {
+    return (g && g->cfg_max_balls > 0) ? g->cfg_max_balls : BALLS_DEFAULT_MAX;
+}
+
 static int compute_speed_level(const Game *g, int level_num) {
     int sl = speed_delai_of(g) - (level_num - 1) * 17;
     if (sl < 1) sl = 1;   /* clamp to at least 1 frame */
@@ -989,8 +1003,10 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
         spawned++;
     }
 
-    /* Pass 2: append until count reached or array is full */
-    int end_cap = BALL_MAX + 1;
+    /* Pass 2: append until count reached or the ball limit is hit.
+     * add_ball (MAIN.ASM:1567-1583) stops when it walks off the last of the
+     * 20 Ball sprites; the port's last slot is Max_Balls from Blaster.cfg. */
+    int end_cap = max_balls_of(g);
     while (spawned < count && g->ball_count < end_cap) {
         create_ball_asm(g, &g->balls[g->ball_count], owner_paddle, owner);
         g->ball_count++;
@@ -1068,10 +1084,14 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         spawn_extra_balls(g, 6, collected_by);
         break;
     case POWERUP_BALL_20:
-        /* MAIN.ASM:option_20_ball_p  mov ecx,20; call add_ball
-         * add_ball skips active slots without decrementing ecx → fills all
-         * inactive slots (up to 20 total). Equivalent to fill-to-max. */
-        if (g->ball_count < BALL_MAX + 1) spawn_extra_balls(g, BALL_MAX + 1 - g->ball_count, collected_by);
+        /* MAIN.ASM:6389-6392 option_20_ball_p  mov ecx,20 / call add_ball:
+         * up to 20 NEW balls, as many as there are free slots. With the
+         * stock 20 slots that fills every free one; with a larger Max_Balls
+         * each pickup adds 20 more. (The port used to request
+         * 20 - ball_count; ball_count includes slots of balls already lost,
+         * so with such gaps it spawned fewer balls than there were free
+         * slots and the screen never reached 20.) */
+        spawn_extra_balls(g, 20, collected_by);
         break;
 
     /* ------------------------------------------------------------------
@@ -1113,6 +1133,15 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * ------------------------------------------------------------------ */
     case POWERUP_NEXT_LEVEL:
         g->state = STATE_NEW_PLAY;  /* trigger level advance in main loop */
+        /* option_next_level_p is a bare ret; the same frame, detect_next_level
+         * sees current_option == option_next_level_o, clears it (@@next) and
+         * falls into @@end: play_sound iff_next_level (MAIN.ASM:4123-4147).
+         * So the pickup's iff_option (played by the caller, MAIN.ASM:5708) is
+         * followed by NEXT.wav, exactly as on a cleared level. The port only
+         * played the pickup sound. STEP 7 skips its own copy when the state
+         * is already NEW_PLAY, so a last brick broken that frame cannot play
+         * it a second time. */
+        if (g->audio) audio_play(g->audio, SFX_LEVEL_COMPLETE);
         break;
 
     /* ------------------------------------------------------------------
@@ -3098,9 +3127,11 @@ void game_update(Game *g, const FrameInput *input) {
      * MAIN.ASM:1094-1095  call detect_next_level; jnc next_level
      * ======================================================================= */
     if (game_level_complete(g)) {
+        /* A next-level bonus collected this frame already played it. */
+        int already_next = (g->state == STATE_NEW_PLAY);
         g->state = STATE_NEW_PLAY;
         /* P1-ASM-31: MAIN.ASM:4141 play_sound iff_next_level on level advance */
-        if (g->audio) audio_play(g->audio, SFX_LEVEL_COMPLETE);
+        if (g->audio && !already_next) audio_play(g->audio, SFX_LEVEL_COMPLETE);
 #if defined(BRICKBLASTER_MOBILE)
         platform_vibrate(200);
 #endif

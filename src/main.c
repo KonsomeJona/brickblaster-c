@@ -166,6 +166,8 @@ static void init_game_session(void) {
      * which point the port silently ignored them. */
     game_set_cfg_scalars(&game, cfg.nbs_ball_start, cfg.speed_delai,
                          cfg.speed_start, cfg.bonus_extra_life);
+    /* Port addition: Max_Balls caps how many balls can be in play at once. */
+    game_set_max_balls(&game, cfg.max_balls);
     /* Demo mode: transfer flag so game AI drives the paddle */
     if (state.demo_flag) game.demo_active = 1;
     /* Dev test mode: load test level with all brick types */
@@ -366,6 +368,15 @@ static void UpdateDrawFrame(void) {
             } else {
                 game.state      = STATE_READY_TO_PLAY;
                 state.game_mode = STATE_READY_TO_PLAY;
+                /* MAIN.ASM:965-966  lea esi,option_text_ready / call print —
+                 * "ready ?" is printed into the same panel slot as the pickup
+                 * banner, so it REPLACES it. Both used to be drawn, and since
+                 * font_draw_string leaves spaces untouched, the "next level"
+                 * banner of the bonus that triggered this and "ready ?"
+                 * interleaved into gibberish. The life-lost path already
+                 * clears the banner the same way (game.c, before
+                 * READY_TO_PLAY_AGAIN). */
+                game.pickup_text_timer = 0;
             }
         }
     }

@@ -50,6 +50,13 @@
 // NBS_BALL_MAX = 19  Earray index max (0..18), so 19 slots = up to 19 balls
 #define BALL_MAX         19     // Blaster.inc:135  NBS_BALL_MAX
 
+// Balls in play at once. The 1999 game has exactly 20 ball sprites,
+// Ball_1..Ball_20 (MAIN.ASM:7066-7085), and add_ball stops at the last one.
+// The port reads the limit from Blaster.cfg Max_Balls (a port addition);
+// BALLS_CAPACITY is the compile-time ceiling that value is clamped to.
+#define BALLS_DEFAULT_MAX 20
+#define BALLS_CAPACITY   100
+
 // Ball speed limits  EASM comment: +angle ↁE(min_x=1,max_x=14), -angle ↁE(min_y=2,max_y=15)
 #define SPEED_MIN_X       1     // Blaster.inc:408  speed_min_x
 #define SPEED_MIN_Y       2     // Blaster.inc:409  speed_min_y

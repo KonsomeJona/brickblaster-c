@@ -34,6 +34,7 @@ typedef struct {
     int nbs_ball_start;             /* Nbs_Life - 1 (ASM dec). FILE.ASM:951, 1137 */
     int start_level;                /* Start_Level.           FILE.ASM:955, 1138 */
     int speed_delai;                /* Freq_Change_Speed.     FILE.ASM:959, 1133 */
+    int max_balls;                  /* Max_Balls. Port addition, not in the 1999 cfg. */
 
     int delai_between_option[3];    /* Time_Between_Option.   FILE.ASM:977-981, 1139-1141 */
     int freq_option[24][3];         /* Freq_Option_* × 24.    FILE.ASM:962-973 */
