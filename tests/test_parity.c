@@ -337,13 +337,62 @@ static void t_life_lost_serves_both_players_again(void) {
     game_update(&g, &fi);
     CHECK(g.state == STATE_READY_TO_PLAY_AGAIN);
 
-    /* Run the paddle explosion out. The deferred serve used to be pre-empted
-     * by a defensive one-ball respawn, so P2 never got a ball back. */
+    /* Run the paddle explosion and destroy_vaisseau's 75-frame pause out.
+     * The deferred serve used to be pre-empted by a defensive one-ball
+     * respawn, so P2 never got a ball back. */
     int i;
-    for (i = 0; i < PADDLE_EXPLO_TICKS + 2; i++) game_update(&g, &fi);
+    for (i = 0; i < PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES + 2; i++) game_update(&g, &fi);
     CHECK(g.ball_count == 2);
     CHECK(g.balls[0].owner == 0);
     CHECK(g.balls[1].owner == 1);
+}
+
+static int balls_in_play(const Game *g) {
+    int i, n = 0;
+    for (i = 0; i < g->ball_count; i++) n += g->balls[i].active;
+    return n;
+}
+
+static void t_click_before_the_serve_is_ignored(void) {
+    begin("a click before the serve is ignored (MAIN.ASM:4792-4818 destroy_vaisseau)");
+    int click;
+    /* Click on every frame of the explosion and of the pause that follows:
+     * the ASM is still inside destroy_vaisseau, so the click is never read.
+     * The port used to launch "nothing" and sit in PLAYING with no ball. */
+    /* The serve lands on frame EXPLO + PAUSE; a click on that very frame
+     * launches at once, as read_click right after start_game would. */
+    for (click = 1; click < PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES; click++) {
+        Game g; boot(&g, 0);
+        g.lives = 3;
+        only_one_ball(&g, 0);
+        g.balls[0].is_magnetic = 0;
+        g.balls[0].x  = PLAY_X1 + 4;
+        g.paddle.x    = PLAY_X2 - g.paddle.w - 4;
+        g.balls[0].y  = 460;
+        g.balls[0].vy = 6;
+        FrameInput fi = idle_input();
+        game_update(&g, &fi);
+        int f, bad = 0;
+        for (f = 1; f <= PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES + 2; f++) {
+            FrameInput in = idle_input();
+            in.fire_pressed = in.fire_held = (f == click);
+            game_update(&g, &in);
+            if (g.state != STATE_READY_TO_PLAY_AGAIN) bad = 1;
+        }
+        if (bad || balls_in_play(&g) != 1) {
+            CHECK(!"click during explosion/pause left the serve");
+            return;
+        }
+        /* The ball is back on the paddle; now a click launches it. */
+        FrameInput go = idle_input();
+        go.fire_pressed = go.fire_held = 1;
+        game_update(&g, &go);
+        if (g.state != STATE_PLAYING || balls_in_play(&g) != 1) {
+            CHECK(!"click after the serve did not launch the ball");
+            return;
+        }
+    }
+    CHECK(1);
 }
 
 int main(void) {
@@ -364,6 +413,7 @@ int main(void) {
     t_duel_counts_balls_per_player();
     t_bonus_life_steps_by_the_cfg_value();
     t_life_lost_serves_both_players_again();
+    t_click_before_the_serve_is_ignored();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

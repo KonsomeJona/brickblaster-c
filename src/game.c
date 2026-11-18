@@ -691,6 +691,7 @@ void game_load_level(Game *g, int level_num) {
     /* Clear per-player ball-lost pending flags on level change. */
     g->p1_ball_lost_pending = 0;
     g->p2_ball_lost_pending = 0;
+    g->respawn_timer        = 0;
 
     /* Init monster system for this level.
      * MAIN.ASM:2927  call init_Monster (selects sprite variant) */
@@ -899,6 +900,23 @@ static void sync_paddle_from_option(Game *g, int who) {
     p->has_gun    = (o == POWERUP_SHOOT || o == POWERUP_MINI_SHOOT); /* MAIN.ASM:1863-1866 */
     p->mini_laser = (o == POWERUP_MINI_SHOOT);
     if (!p->has_gun) p->gun_cooldown = 0;
+
+    /* Gun sprites. A newly carried gun restarts their animations, as
+     * option_shoot_p / option_mini_shoot_p do once per arming (guarded by
+     * init_big/mini_shoot_flag, which clear_cannon* resets when the option
+     * goes, MAIN.ASM:2041-2059 and 6509-6601); otherwise they age a frame. */
+    {
+        int kind = !p->has_gun ? 0 : (p->mini_laser ? 2 : 1);
+        if (kind != p->cannon_kind) {
+            p->cannon_kind     = kind;
+            p->cannon_tick_big = p->cannon_tick_l = p->cannon_tick_r = 0;
+            p->cannon_fire_l   = p->cannon_fire_r = 0;
+        } else if (kind) {
+            if (p->cannon_tick_big < 1000) p->cannon_tick_big++;
+            if (p->cannon_tick_l   < 1000) p->cannon_tick_l++;
+            if (p->cannon_tick_r   < 1000) p->cannon_tick_r++;
+        }
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -2045,14 +2063,22 @@ void game_update(Game *g, const FrameInput *input) {
      * explosion on both paddles.  When a paddle's explo_timer reaches 0
      * and there's no ball in play yet, spawn the replacement (deferred
      * from handle_life_lost). */
+    /* destroy_vaisseau's closing pause (RESPAWN_PAUSE_FRAMES): serve when
+     * it runs out — start_game / init_first_ball in the ASM. */
+    if (g->respawn_timer > 0 && --g->respawn_timer == 0 &&
+        g->state == STATE_READY_TO_PLAY_AGAIN && g->ball_count == 0) {
+        game_spawn_ball(g);
+    }
     Paddle *paddles_anim[2] = { &g->paddle, &g->paddle_2 };
     for (i = 0; i < 2; i++) {
         if (paddles_anim[i]->explo_timer > 0) {
             paddles_anim[i]->explo_timer--;
+            /* Explosion over: the ship is deleted and the 75-frame pause
+             * starts. The serve used to happen right here. */
             if (paddles_anim[i]->explo_timer == 0 &&
                 g->state == STATE_READY_TO_PLAY_AGAIN &&
                 g->ball_count == 0) {
-                game_spawn_ball(g);
+                g->respawn_timer = RESPAWN_PAUSE_FRAMES;
             }
         }
         /* MAIN.ASM:2420-2460 Init_Cursor_Telepod — telepod paddle anim. */
@@ -2213,8 +2239,21 @@ void game_update(Game *g, const FrameInput *input) {
     {
         int p1_fire = fire_pressed;
         int p2_fire = (g->game_mode > 0) ? input->p2_fire : 0;
+        /* Only a served ball can be launched. After a lost life the ASM is
+         * still inside destroy_vaisseau (explosion + RESPAWN_PAUSE_FRAMES)
+         * and never reaches detect_start_game; the port read the click
+         * anyway, switched to PLAYING with no ball, and the deferred serve
+         * (READY_TO_PLAY_AGAIN only) never came: no ball, forever. */
+        int serve_ready = (g->paddle.explo_timer == 0 &&
+                           g->paddle_2.explo_timer == 0 &&
+                           g->respawn_timer == 0);
+        if (serve_ready) {
+            int has_ball = 0;
+            for (i = 0; i < g->ball_count; i++) has_ball |= g->balls[i].active;
+            serve_ready = has_ball;
+        }
         if ((g->state == STATE_READY_TO_PLAY || g->state == STATE_READY_TO_PLAY_AGAIN)
-            && (p1_fire || p2_fire)) {
+            && serve_ready && (p1_fire || p2_fire)) {
             /* Launch ball(s): MAIN.ASM:5290  mov game_mode,PLAYING */
             g->state = STATE_PLAYING;
             int launch_vx, launch_vy;
@@ -2277,7 +2316,8 @@ void game_update(Game *g, const FrameInput *input) {
          * for the explosion, and serve through game_spawn_ball so both players
          * and both owner tags are set. */
         int explo_pending = (g->paddle.explo_timer > 0 ||
-                             g->paddle_2.explo_timer > 0);
+                             g->paddle_2.explo_timer > 0 ||
+                             g->respawn_timer > 0);
         if (!explo_pending && (g->ball_count < 1 || !g->balls[0].active)) {
             game_spawn_ball(g);
         }
@@ -2450,8 +2490,12 @@ void game_update(Game *g, const FrameInput *input) {
                 if (g->paddle.gun_side) {
                     /* MAIN.ASM:1987  add eax,vaisseau_decal_x_r+6 */
                     p->x = g->paddle.x + VAISSEAU_DECAL_X_R + 6;
+                    /* MAIN.ASM:1988-1995 restart that cannon's recoil */
+                    g->paddle.cannon_tick_r = 0; g->paddle.cannon_fire_r = 1;
                 } else {
                     p->x = g->paddle.x + VAISSEAU_DECAL_X_L;
+                    /* MAIN.ASM:1998-2006 */
+                    g->paddle.cannon_tick_l = 0; g->paddle.cannon_fire_l = 1;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;
@@ -2506,8 +2550,10 @@ void game_update(Game *g, const FrameInput *input) {
                 g->paddle_2.gun_side ^= 1;
                 if (g->paddle_2.gun_side) {
                     p->x = g->paddle_2.x + VAISSEAU_DECAL_X_R + 6;
+                    g->paddle_2.cannon_tick_r = 0; g->paddle_2.cannon_fire_r = 1;
                 } else {
                     p->x = g->paddle_2.x + VAISSEAU_DECAL_X_L;
+                    g->paddle_2.cannon_tick_l = 0; g->paddle_2.cannon_fire_l = 1;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;

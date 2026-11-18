@@ -152,6 +152,13 @@
 /* Maximum simultaneous projectiles (Shoot_1..Shoot_20, but paddle fires 2 at once) */
 #define MAX_PROJECTILES     20
 
+/* MAIN.ASM:4792-4818 destroy_vaisseau, called by test_game_over between the
+ * "play again" and "ready ?" prints, runs the ship explosion to its end, then
+ * deletes the cursor sprite(s) and calls `mov ecx,75 / call refresh_all`:
+ * 75 more frames with no ship and no ball before start_game serves again.
+ * The game loop (and so detect_start_game's click) does not run meanwhile. */
+#define RESPAWN_PAUSE_FRAMES 75
+
 /* ============================================================================
  * Projectile — paddle laser shot
  * MAIN.ASM  vaisseau_tir_speed = 1 (Blaster.inc:242)
@@ -212,6 +219,11 @@ typedef struct {
      * detect_game_over_player_1 — per-player path. */
     int          p1_ball_lost_pending;
     int          p2_ball_lost_pending;
+
+    /* Frames left in the pause between the end of the ship explosion and the
+     * new serve, after a lost life (see RESPAWN_PAUSE_FRAMES). While it runs
+     * there is no ball, no paddle on screen and "play again" is shown. */
+    int          respawn_timer;
 
     Brick        bricks[BRICK_COUNT]; /* 13*30 = 390 bricks */
 

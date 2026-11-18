@@ -79,6 +79,18 @@ typedef struct {
                          * paddle renders the explosion sprite and the
                          * ball respawn is deferred.  Frame index =
                          * 7 - (explo_timer - 1) / 4. */
+    /* Gun sprites riding on the ship — cursor_N_tir_big / _tir_left /
+     * _tir_right, placed every frame at the vaisseau_decal_* offsets
+     * (MOUSE.ASM:241-260) and shown for as long as the shoot option is
+     * carried (Detect_Shoot_player_1/2, MAIN.ASM:1859-1878). Ticks count the
+     * frames since each sprite's animation (re)started; draw.c turns them
+     * into the frame Refresh_Sprites would be showing. */
+    int cannon_kind;      /* gun carried last frame: 0 none, 1 big, 2 mini  */
+    int cannon_tick_big;  /* launcher, since the big shoot was armed        */
+    int cannon_tick_l;    /* left cannon, since armed or since its last shot */
+    int cannon_tick_r;    /* right cannon, likewise                          */
+    int cannon_fire_l;    /* 1 = left cannon runs the firing sequence        */
+    int cannon_fire_r;    /* 1 = right cannon runs the firing sequence       */
     int telepod_timer;  /* POWERUP_TELEPOD paddle animation countdown.
                          * Blaster.inc:293-330 vaisseau_telepod_* —
                          * 10 frames at speed 1 = 10 ticks. Stamps the

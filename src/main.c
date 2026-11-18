@@ -96,14 +96,6 @@ static Hiscores           hiscores;
 static GameConfig         cfg;             /* P1-ASM-23: Blaster.cfg overrides. */
 
 static int                game_over_timer = 0;
-/* Frame counter for the "play again" overlay after losing a life.
- * Counts down from PLAY_AGAIN_FRAMES when STATE_READY_TO_PLAY_AGAIN is
- * first entered; while >0 we render option_text_again, then fall through
- * to the normal ready overlay (MAIN.ASM:4695-4705 shows "play again" then
- * "ready" back-to-back after restart). */
-#define PLAY_AGAIN_FRAMES 60
-static int                play_again_timer = 0;
-static int                prev_ready_state = 0; /* edge-detect entry into _AGAIN */
 static FrameInput         fi;  /* polled once per frame, passed to game_update */
 
 /* On native desktop we use custom frame control: PollInputEvents() at the top
@@ -116,6 +108,27 @@ static FrameInput         fi;  /* polled once per frame, passed to game_update *
 #define FINISH_DRAWING() EndDrawing()
 #endif
 
+
+/* Level-change fade — MAIN.ASM:933-967 _next_level:
+ *     call Shade_Off      ; 32 frames, palette 0 -> 31, last frame frozen
+ *     call next_fond      ; load the next background while the screen is dark
+ *     call Shade_On       ; 32 frames, palette 31 -> 0, background only
+ *     ... jmp start_game  ; bricks, sprites, panels, "ready ?"
+ * The game loop does not run meanwhile, so neither do input or pause. The
+ * port switched levels in a single frame. */
+#define LEVEL_FADE_STEPS 32
+enum { LEVEL_FADE_NONE = 0, LEVEL_FADE_OUT, LEVEL_FADE_IN };
+static int level_fade_phase = LEVEL_FADE_NONE;
+static int level_fade_step  = 0;
+
+/* Present the canvas darkened to Shade step `step` (0 = untouched). */
+static void present_level_fade(int step) {
+    draw_canvas_fade(&dc, step);
+    BeginDrawing();
+    ClearBackground(BLACK);
+    draw_canvas_to_screen(&dc, &game);
+    FINISH_DRAWING();
+}
 
 /* Pause cooldown prevents instant unpause from same input that paused. */
 #define PAUSE_COOLDOWN_FRAMES 20
@@ -323,6 +336,35 @@ static void UpdateDrawFrame(void) {
     if (IsKeyPressed(KEY_F12)) gif_recorder_toggle();
 
     if (state.game_mode == STATE_NEW_PLAY && game_initialized) {
+        /* Shade_Off only happens on the way to another level: past the last
+         * one, next_level calls display_score_from_final instead of reaching
+         * _next_level (MAIN.ASM:916-929). The demo wraps to level 1 THROUGH
+         * _next_level, so it fades. */
+        if (level_fade_phase == LEVEL_FADE_NONE) {
+            int total_now = level_count(game.world);
+            if (total_now < 1) total_now = 1;
+            if (game.level_num + 1 <= total_now || state.demo_flag) {
+                level_fade_phase = LEVEL_FADE_OUT;
+                level_fade_step  = 0;
+            }
+        }
+        if (level_fade_phase == LEVEL_FADE_OUT) {
+            if (level_fade_step < LEVEL_FADE_STEPS) {
+                /* Shade_Off: the level's last frame, frozen, darkening. */
+                draw_frame_to_canvas(&dc, &game);
+                if (state.demo_flag && game.pickup_text_timer <= 0) {
+                    BeginTextureMode(dc.canvas);
+                    draw_demo_overlay();
+                    EndTextureMode();
+                }
+                present_level_fade(level_fade_step);
+                level_fade_step++;
+                goto frame_end;
+            }
+            /* Dark: next_fond / the level load below, then Shade_On. */
+            level_fade_phase = LEVEL_FADE_IN;
+            level_fade_step  = LEVEL_FADE_STEPS - 1;
+        }
         game.level_num++;
         /* MAIN.ASM:912-929  next_level:
          *   inc current_level / mov eax,current_level
@@ -381,6 +423,16 @@ static void UpdateDrawFrame(void) {
         }
     }
 
+    /* Shade_On: the next level's background (with its border pillars) fades
+     * in on its own; the state machine — and with it the bricks, sprites,
+     * panels and "ready ?" — resumes once it is fully lit. */
+    if (level_fade_phase == LEVEL_FADE_IN) {
+        draw_background_to_canvas(&dc, &game);
+        present_level_fade(level_fade_step);
+        if (--level_fade_step < 0) level_fade_phase = LEVEL_FADE_NONE;
+        goto frame_end;
+    }
+
     /* State machine */
     switch (state.game_mode) {
 
@@ -434,8 +486,6 @@ static void UpdateDrawFrame(void) {
          * to the menu — otherwise a demo that ended on game-over would
          * leak the flag into a subsequent real play session. */
         state.demo_flag  = 0;
-        prev_ready_state = 0;   /* reset play-again edge detector */
-        play_again_timer = 0;
         menu_handle_input(&state, &menu, &audio, &fi);
         BeginTextureMode(dc.canvas);
         menu_draw(&state, &menu);
@@ -531,14 +581,6 @@ static void UpdateDrawFrame(void) {
             game_initialized   = 0;
             break;
         }
-        /* P1-ASM-17: MAIN.ASM:4695-4705 fires option_text_again then
-         * option_text_ready back-to-back on respawn. Start the timer when
-         * we transition into _AGAIN (prev_ready_state tracks the previous
-         * game.state across all frames; see the update below). */
-        if (state.game_mode == STATE_READY_TO_PLAY_AGAIN &&
-            prev_ready_state != STATE_READY_TO_PLAY_AGAIN) {
-            play_again_timer = PLAY_AGAIN_FRAMES;
-        }
         /* Initialize game on first entry from menu */
         if (!game_initialized) init_game_session();
 
@@ -559,9 +601,14 @@ static void UpdateDrawFrame(void) {
 
         draw_frame_to_canvas(&dc, &game);
         BeginTextureMode(dc.canvas);
-        if (play_again_timer > 0) {
+        /* test_game_over (MAIN.ASM:4695-4705) prints option_text_again, runs
+         * destroy_vaisseau (explosion + 75-frame pause) and only then prints
+         * option_text_ready: "play again" stays up exactly until the serve.
+         * A fixed 60-frame timer used to stand in for it. */
+        if (state.game_mode == STATE_READY_TO_PLAY_AGAIN &&
+            (game.paddle.explo_timer > 0 || game.paddle_2.explo_timer > 0 ||
+             game.respawn_timer > 0)) {
             draw_play_again_screen(&state);
-            play_again_timer--;
         } else {
             draw_ready_screen(&state);
         }
@@ -806,11 +853,7 @@ static void UpdateDrawFrame(void) {
         break;
     }
 
-    /* Track previous state for the play-again edge detector (P1-ASM-17).
-     * Only the _AGAIN → _AGAIN persistence matters here; other transitions
-     * are fine. */
-    prev_ready_state = state.game_mode;
-
+frame_end:
     /* GIF recorder: capture canvas once per frame if recording. Also draw REC
      * indicator in window coordinates so it appears over the letterbox. */
     if (gif_recorder_is_recording()) {

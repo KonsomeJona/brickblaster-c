@@ -38,6 +38,9 @@ void paddle_init(Paddle *p)
     p->prev_x      = p->x;
     p->explo_timer = 0;
     p->telepod_timer = 0;
+    p->cannon_kind = 0;
+    p->cannon_tick_big = p->cannon_tick_l = p->cannon_tick_r = 0;
+    p->cannon_fire_l = p->cannon_fire_r = 0;
 }
 
 /* --------------------------------------------------------------------------
