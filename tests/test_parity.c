@@ -337,13 +337,97 @@ static void t_life_lost_serves_both_players_again(void) {
     game_update(&g, &fi);
     CHECK(g.state == STATE_READY_TO_PLAY_AGAIN);
 
-    /* Run the paddle explosion out. The deferred serve used to be pre-empted
-     * by a defensive one-ball respawn, so P2 never got a ball back. */
+    /* Run the paddle explosion and destroy_vaisseau's 75-frame pause out.
+     * The deferred serve used to be pre-empted by a defensive one-ball
+     * respawn, so P2 never got a ball back. */
     int i;
-    for (i = 0; i < PADDLE_EXPLO_TICKS + 2; i++) game_update(&g, &fi);
+    for (i = 0; i < PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES + 2; i++) game_update(&g, &fi);
     CHECK(g.ball_count == 2);
     CHECK(g.balls[0].owner == 0);
     CHECK(g.balls[1].owner == 1);
+}
+
+static int balls_in_play(const Game *g) {
+    int i, n = 0;
+    for (i = 0; i < g->ball_count; i++) n += g->balls[i].active;
+    return n;
+}
+
+static void t_click_before_the_serve_is_ignored(void) {
+    begin("a click before the serve is ignored (MAIN.ASM:4792-4818 destroy_vaisseau)");
+    int click;
+    /* Click on every frame of the explosion and of the pause that follows:
+     * the ASM is still inside destroy_vaisseau, so the click is never read.
+     * The port used to launch "nothing" and sit in PLAYING with no ball. */
+    /* The serve lands on frame EXPLO + PAUSE; a click on that very frame
+     * launches at once, as read_click right after start_game would. */
+    for (click = 1; click < PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES; click++) {
+        Game g; boot(&g, 0);
+        g.lives = 3;
+        only_one_ball(&g, 0);
+        g.balls[0].is_magnetic = 0;
+        g.balls[0].x  = PLAY_X1 + 4;
+        g.paddle.x    = PLAY_X2 - g.paddle.w - 4;
+        g.balls[0].y  = 460;
+        g.balls[0].vy = 6;
+        FrameInput fi = idle_input();
+        game_update(&g, &fi);
+        int f, bad = 0;
+        for (f = 1; f <= PADDLE_EXPLO_TICKS + RESPAWN_PAUSE_FRAMES + 2; f++) {
+            FrameInput in = idle_input();
+            in.fire_pressed = in.fire_held = (f == click);
+            game_update(&g, &in);
+            if (g.state != STATE_READY_TO_PLAY_AGAIN) bad = 1;
+        }
+        if (bad || balls_in_play(&g) != 1) {
+            CHECK(!"click during explosion/pause left the serve");
+            return;
+        }
+        /* The ball is back on the paddle; now a click launches it. */
+        FrameInput go = idle_input();
+        go.fire_pressed = go.fire_held = 1;
+        game_update(&g, &go);
+        if (g.state != STATE_PLAYING || balls_in_play(&g) != 1) {
+            CHECK(!"click after the serve did not launch the ball");
+            return;
+        }
+    }
+    CHECK(1);
+}
+
+/* Fire one shot straight up at column x through two adjacent 1-hit bricks
+ * (row 10, columns 5 and 6, seam at x = 304). Returns bit 0 = left gone,
+ * bit 1 = right gone. */
+static int shoot_at_seam(int big, int x) {
+    Game g; boot(&g, 0);
+    int i, f, a = 10 * BRICK_COLS + 5, b = a + 1;
+    unsigned char raw = BRICK_COLOR_BLUE | BRICK_NORMAL | 1;
+    for (i = 0; i < BRICK_COUNT; i++) { brick_init(&g.bricks[i], i, ABSENTE); g.current_level.bricks[i] = ABSENTE; }
+    brick_init(&g.bricks[a], a, raw); g.current_level.bricks[a] = raw;
+    brick_init(&g.bricks[b], b, raw); g.current_level.bricks[b] = raw;
+    brick_init(&g.bricks[0], 0, raw); g.current_level.bricks[0] = raw;   /* level stays open */
+    g.balls[0].active = 0; g.ball_count = 0;
+    memset(&g.projectiles[0], 0, sizeof(g.projectiles[0]));
+    g.projectiles[0].active = 1; g.projectiles[0].is_big = big;
+    g.projectiles[0].x = x; g.projectiles[0].y = 300; g.proj_count = 1;
+    FrameInput fi = idle_input();
+    for (f = 0; f < 200 && g.proj_count; f++) { g.state = STATE_PLAYING; game_update(&g, &fi); }
+    return (!g.bricks[a].active) | ((!g.bricks[b].active) << 1);
+}
+
+static void t_big_shot_splits_a_seam(void) {
+    begin("big shot: two corners, two bricks across a seam (MAIN.ASM:3601-3705, 3831-3888)");
+    /* detect_colision_brique tests the shot's top-left (x) and bottom-right
+     * (x + 8) corners, so a seam with x < 304 <= x + 8 is hit on both sides. */
+    int x, ok = 1;
+    for (x = 270; x <= 320; x++) {
+        int want = (x < 304 && 304 <= x + SHOOT_W) ? 3 : (x < 304 ? 1 : 2);
+        if (shoot_at_seam(1, x) != want) ok = 0;
+    }
+    CHECK(ok);
+    /* A mini shot dies after its first sweep with a hit: one brick only. */
+    CHECK(shoot_at_seam(0, 302) == 1);
+    CHECK(shoot_at_seam(0, 304) == 2);
 }
 
 int main(void) {
@@ -364,6 +448,8 @@ int main(void) {
     t_duel_counts_balls_per_player();
     t_bonus_life_steps_by_the_cfg_value();
     t_life_lost_serves_both_players_again();
+    t_click_before_the_serve_is_ignored();
+    t_big_shot_splits_a_seam();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

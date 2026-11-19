@@ -74,6 +74,7 @@
 #endif
 
 #include "raylib.h"
+#include "rlgl.h"       /* rlSetBlendFactors: the level-change palette fade */
 #include <stdio.h>
 #include <math.h>
 
@@ -138,7 +139,8 @@ static const Rectangle SR_BRICK_REFLET     = { 585, 97, 32, 16 };
 #define BRICK_TRANSP_BASE_X  198
 /* Blaster.inc:347  brique_teleport_o= 231+(screen_x*095) */
 #define BRICK_TELE_BASE_X    231
-/* Multi-hit base: Blaster.inc:351  brique_multi_o = 033+(screen_x*095) */
+/* Blaster.inc:351  brique_multi_o = 033+(screen_x*095) — the level editor's
+ * multi-hit marker (vertical band). Never used in play; see get_brick_rect. */
 #define BRICK_MULTI_BASE_X   33
 
 /* --- Powerups (26x24) --- */
@@ -205,9 +207,8 @@ static const int POWERUP_SPRITE_COL[POWERUP_COUNT] = {
 static const Rectangle SR_PROJ_MINI       = {  85, 164,  3, 13 };
 static const Rectangle SR_PROJ_BIG        = { 444, 339,  8, 42 };
 
-/* --- Paddle cannon recoil overlay (draw_cannon_flash frame 0) ---
- * Blaster.inc:230-252  vaisseau_1/2_tir_left/right/big. We draw frame 0
- * of each animation as a muzzle flash; per-player, per-cannon. */
+/* --- Gun sprites on the ship, frame 0 of each (see draw_cannons) ---
+ * Blaster.inc:230-252  vaisseau_1/2_tir_left/right/big, per player. */
 static const Rectangle SR_CANNON_MINI_P1_L = { 374, 183, 12, 18 };
 static const Rectangle SR_CANNON_MINI_P1_R = { 402, 183, 12, 18 };
 static const Rectangle SR_CANNON_MINI_P2_L = { 374, 405, 12, 18 };
@@ -293,15 +294,18 @@ static Rectangle get_brick_rect(const Brick *b) {
         break;
 
     default:
-        /* BRICK_NORMAL: classic (HP=1) vs multi-hit (HP>1) use different base sprites.
-         * Blaster.inc:345  brique_classic_o = 066+(screen_x*095) — single-hit bricks
-         * Blaster.inc:351  brique_multi_o   = 033+(screen_x*095) — multi-hit bricks */
-        {
-            /* Same capped value as the damage state below — equivalent here
-             * (both 7 and the capped 4 are > 1) but reading `raw` twice with
-             * two different meanings is how the damage bug got in. */
-            base_x = (b->hp_initial > 1) ? BRICK_MULTI_BASE_X : BRICK_BASE_X;
-        }
+        /* BRICK_NORMAL: every normal brick starts on brique_classic_o in play,
+         * multi-hit ones included. draw_brique only swaps in brique_multi_o
+         * (the variant with the vertical band) for the level EDITOR:
+         *     cmp game_mode,EDIT / jne @@d
+         *     cmp esi,brique_classic_o / jne @@d
+         *     mov esi,brique_multi_o                (MAIN.ASM:4972-4977)
+         * Each hit then adds next_brique to the stored sprite address
+         * (MAIN.ASM:4002), i.e. classic -> 3 crack stages, which the damage
+         * offset below reproduces. The port used brique_multi_o in play, so
+         * multi-hit bricks showed the editor band and ran one frame behind.
+         * (The port's editor draws its own previews and never comes here.) */
+        base_x = BRICK_BASE_X;
         base_y = BRICK_BASE_Y;
         break;
     }
@@ -514,6 +518,18 @@ static void draw_bricks(DrawContext *dc, const Game *g) {
 
         Rectangle src = get_brick_rect(b);
 
+        /* Teleporter animation — MAIN.ASM:6149-6200 draw_telepod. Every
+         * DELAI_TELEPOD frames each teleporteuse cell is redrawn at
+         * brique_teleport_o + current_telepod, and current_telepod steps by
+         * next_brique (33 px) through 6 frames before wrapping to 0. The port
+         * only ever drew frame 0, so the doors sat still. g->frame only
+         * advances inside game_update, so the cycle freezes on pause as the
+         * ASM's does (draw_telepod is called from the play loops only). */
+        if (b->type == BRICK_TELEPORTER) {
+            int tframe = (g->frame / DELAI_TELEPOD) % 6;   /* next_brique*6 */
+            src.x += (float)(tframe * BRICK_DAMAGE_STRIDE);
+        }
+
         /* Indestructible brick reflet (hit-triggered ripple).
          * MAIN.ASM:4058-4061 stamps brique_reflet_o+next_reflet*nbs_reflet
          * on ball impact; MAIN.ASM:6220-6240 decrements the sprite offset
@@ -634,32 +650,56 @@ static void draw_balls(DrawContext *dc, const Game *g) {
  * Paddle size selects from three sprite variants at same Y row (42).
  * Blaster.inc:225  vaisseau_1_o = 000+(screen_x*042) → Rect(0, 42, 74, 25)
  * ============================================================================ */
-/* Cannon recoil animation overlays (Blaster.inc:230-252).  Each set is
- * a vertical column of frames with stride 37 for mini, 1 for big — we
- * just show frame 0 while gun_cooldown is non-zero.  Enough to register
- * the shot visually without porting the full 6/4-frame sequence. */
-static void draw_cannon_flash(DrawContext *dc, const Paddle *p, int p2) {
-    if (p->gun_cooldown <= 0 || !p->has_gun) return;
-    Rectangle src;
-    int ox, oy;
+/* Gun sprites on the ship (Blaster.inc:230-252, cursor_N_tir_*). They are
+ * visible for as long as the shoot option is carried — Detect_Shoot sets
+ * their status On every frame (MAIN.ASM:1859-1878) — not just after a shot.
+ * The port used to show frame 0 only while gun_cooldown ran, so the armed
+ * big-shoot launcher never appeared at all.
+ *
+ * Frames follow Refresh_Sprites (DRAW.ASM:368-414): one step every
+ * shape_speed+1 = 2 frames, and the animation freezes once the 10/12-frame
+ * count_tir_* runs out (nbs_shape = 1, MAIN.ASM:1881-1903). Worked through
+ * from option_shoot_p / option_mini_shoot_p (MAIN.ASM:6509-6601) and the
+ * firing code (MAIN.ASM:1987-2008), with t = frames since the start: */
+
+/* Launcher, 4 frames 14 px apart: 0,0,0,1,1,2,2, then 3 (rocket up) held. */
+static int big_launcher_frame(int t) {
+    if (t < 3) return 0;
+    if (t < 5) return 1;
+    if (t < 7) return 2;
+    return 3;
+}
+
+/* Side cannon, 6 frames 37 px apart, resting on frame 5. Arming starts with
+ * current_shape 6 (steps at t=1,3,5,7,9); a shot restarts it with
+ * current_shape 1, so the first step only rewinds (frame 0 until t=3). */
+static int side_cannon_frame(int t, int firing) {
+    int f;
+    if (!firing) { if (t < 1) return 0; f = 1 + (t - 1) / 2; }
+    else         { if (t < 3) return 0; f = 1 + (t - 3) / 2; }
+    return (f > 5) ? 5 : f;
+}
+
+static void draw_cannons(DrawContext *dc, const Paddle *p, int p2) {
+    if (!p->has_gun) return;
     if (!p->mini_laser) {
-        src = p2 ? SR_CANNON_BIG_P2 : SR_CANNON_BIG_P1;
-        ox  = VAISSEAU_DECAL_X_B;
-        oy  = VAISSEAU_DECAL_Y_B;
-    } else {
-        /* Mini shoot: gun_side reflects the LAST shot's cannon (game.c
-         * toggles before computing the projectile position). */
-        if (p->gun_side) {
-            src = p2 ? SR_CANNON_MINI_P2_R : SR_CANNON_MINI_P1_R;
-            ox  = VAISSEAU_DECAL_X_R;
-        } else {
-            src = p2 ? SR_CANNON_MINI_P2_L : SR_CANNON_MINI_P1_L;
-            ox  = VAISSEAU_DECAL_X_L;
-        }
-        oy = VAISSEAU_DECAL_Y_L;
+        Rectangle src = p2 ? SR_CANNON_BIG_P2 : SR_CANNON_BIG_P1;
+        src.x += (float)(14 * big_launcher_frame(p->cannon_tick_big));
+        Vector2 pos = { (float)(p->x + VAISSEAU_DECAL_X_B),
+                        (float)(p->y + VAISSEAU_DECAL_Y_B) };
+        DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+        return;
     }
-    Vector2 pos = { (float)(p->x + ox), (float)(p->y + oy) };
-    DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
+    {
+        Rectangle l = p2 ? SR_CANNON_MINI_P2_L : SR_CANNON_MINI_P1_L;
+        Rectangle r = p2 ? SR_CANNON_MINI_P2_R : SR_CANNON_MINI_P1_R;
+        l.y += (float)(37 * side_cannon_frame(p->cannon_tick_l, p->cannon_fire_l));
+        r.y += (float)(37 * side_cannon_frame(p->cannon_tick_r, p->cannon_fire_r));
+        Vector2 lp = { (float)(p->x + VAISSEAU_DECAL_X_L), (float)(p->y + VAISSEAU_DECAL_Y_L) };
+        Vector2 rp = { (float)(p->x + VAISSEAU_DECAL_X_R), (float)(p->y + VAISSEAU_DECAL_Y_R) };
+        DrawTextureRec(dc->assets->sprite_sheet, l, lp, WHITE);
+        DrawTextureRec(dc->assets->sprite_sheet, r, rp, WHITE);
+    }
 }
 
 /* Clamp an animation frame index into [0, max_frames-1]. */
@@ -713,31 +753,53 @@ static void draw_paddle_explosion(DrawContext *dc, const Paddle *p, int p2) {
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
 }
 
+/* Paddle LED animation. The paddle IS an animated sprite in the ASM:
+ * _Init_Cursor_player_1/2 (MAIN.ASM:1777-1781, 1828-1832) give the normal
+ * ship sprite_nbs_shape=4, shape_speed=5, next_shape=0; the large ship
+ * (MAIN.ASM:2566-2570, 2665-2669) 2 frames at speed 10, the small ship
+ * (MAIN.ASM:2616-2620, 2718-2722) 2 frames at speed 8. Refresh_Sprites
+ * (DRAW.ASM:388-414) steps one frame every speed+1 ticks, each frame
+ * sprite_size_x + next_shape further right on the sheet. On the normal
+ * ship the 4 frames light the middle, left, middle, right LED — the
+ * "K2000" sweep; the large ship swaps its LED pairs, the small one blinks. */
+static Rectangle paddle_anim_frame(Rectangle r, PaddleSize size, int tick) {
+    int nbs, speed;
+    switch (size) {
+    case PADDLE_SIZE_LARGE: nbs = 2; speed = 10; break;
+    case PADDLE_SIZE_SMALL: nbs = 2; speed =  8; break;
+    default:                nbs = 4; speed =  5; break;
+    }
+    if (tick < 0) tick = 0;
+    r.x += (float)(((tick / (speed + 1)) % nbs) * (int)r.width);
+    return r;
+}
+
 /* Draw a single paddle with all overlays — exploded sprite while
  * explo_timer is counting, otherwise normal paddle + cannon flash +
  * optional telepod overlay on top. */
-static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2) {
+static void draw_one_paddle(DrawContext *dc, const Paddle *p, int p2, int tick) {
     if (p->explo_timer > 0) {
         draw_paddle_explosion(dc, p, p2);
         return;
     }
-    Rectangle src = get_paddle_rect(p, p2);
+    Rectangle src = paddle_anim_frame(get_paddle_rect(p, p2), p->size, tick);
     Vector2 pos   = { (float)p->x, (float)p->y };
     DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
-    /* (Non-ASM "KITT" LED scanner removed — DRAW.ASM draws the paddle
-     * as a single static sprite; same fidelity rule as the P0-ASM-6
-     * screen-shake/red-flash purge.) */
-    draw_cannon_flash(dc, p, p2);
+    draw_cannons(dc, p, p2);
     if (p->telepod_timer > 0) draw_paddle_telepod(dc, p);
 }
 
 static void draw_paddle(DrawContext *dc, const Game *g) {
     if (!dc->assets->sprite_sheet_loaded) return;
+    /* destroy_vaisseau deletes the ship(s) once the explosion has played
+     * (`mov cursor_1.sprite_delete,2`, and cursor_2 with two players,
+     * MAIN.ASM:4807-4812); they come back with the serve. */
+    if (g->respawn_timer > 0) return;
 
-    draw_one_paddle(dc, &g->paddle, 0);
+    draw_one_paddle(dc, &g->paddle, 0, g->frame);
     /* P1-ASM-28: in MP, P2 uses the true P2 paddle sprite row (Y=68). */
     if (g->game_mode > 0) {
-        draw_one_paddle(dc, &g->paddle_2, 1);
+        draw_one_paddle(dc, &g->paddle_2, 1, g->frame);
     }
 }
 
@@ -760,13 +822,15 @@ static void draw_projectiles(DrawContext *dc, const Game *g) {
         /* Projectile sprites are shared across players — MAIN.ASM tags
          * sprite_player on the fired entity for scoring attribution, but
          * visually both players shoot the same `shoot` / `mini_shoot`
-         * graphic.  Center the narrower sprite on the paddle-relative
-         * spawn point (game.c places p->x with vaisseau_tir's 12px width
-         * in mind; the real projectile is 3 or 8 wide). */
+         * graphic. Drawn at the shot's own position, as Draw_sprites does
+         * with sprite_pos_x/y: game.c already places p->x the ASM way
+         * (MAIN.ASM:1949-1954, 1984-2007), and the brick sweep and monster
+         * test work from that same x. The port used to shift the sprite
+         * right by 2 (big) / 4 (mini) px to "centre" it, which would put
+         * what you aim with off what gets tested. Whole pixels, so no
+         * half-texel bleed of the sheet's orange frame border. */
         Rectangle src = p->is_big ? SR_PROJ_BIG : SR_PROJ_MINI;
-        float pad_w   = p->is_big ? 13.0f : 12.0f;   /* cannon sprite width */
-        float offset  = (pad_w - src.width) * 0.5f;
-        Vector2 pos   = { (float)p->x + offset, (float)p->y };
+        Vector2 pos   = { (float)p->x, (float)p->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
     }
 }
@@ -1069,6 +1133,39 @@ void draw_frame_to_canvas(DrawContext *dc, const Game *g) {
         DrawText(buf, 2, 14, 10, YELLOW);
     }
 
+    EndTextureMode();
+}
+
+
+/* ============================================================================
+ * Level-change fade — MAIN.ASM:933-967 _next_level: Shade_Off, next_fond,
+ * Shade_On (DRAW.ASM:218-357).
+ *
+ * init_shade builds 32 palettes, each with every 6-bit VGA component 2 lower
+ * than the one before, floored at 0 (`dec al` twice, skipping at 0).
+ * Shade_Off sets palette 0..31, one per wait_synchro; Shade_On 31..0. The
+ * sheets and backgrounds hold those VGA levels x4, so palette k is exactly
+ * "subtract 8*k from every channel, floor 0": a reverse-subtract blend of a
+ * grey rectangle over the canvas. Alpha is left alone (source alpha 0).
+ * ============================================================================ */
+void draw_canvas_fade(DrawContext *dc, int step) {
+    if (step <= 0) return;
+    if (step > 31) step = 31;
+    unsigned char v = (unsigned char)(step * 8);
+    BeginTextureMode(dc->canvas);
+    rlSetBlendFactors(RL_ONE, RL_ONE, RL_FUNC_REVERSE_SUBTRACT);
+    BeginBlendMode(BLEND_CUSTOM);
+    DrawRectangle(0, 0, SCREEN_W, SCREEN_H, (Color){ v, v, v, 0 });
+    EndBlendMode();
+    EndTextureMode();
+}
+
+/* What Shade_On fades in: next_fond has just put the new background (with
+ * the border pillars) on screen, and nothing else — bricks, sprites and
+ * panels are drawn by start_game after the fade (MAIN.ASM:1032-1055). */
+void draw_background_to_canvas(DrawContext *dc, const Game *g) {
+    BeginTextureMode(dc->canvas);
+    draw_background(dc, g);
     EndTextureMode();
 }
 

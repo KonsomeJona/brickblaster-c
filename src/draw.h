@@ -103,3 +103,11 @@ void draw_canvas_to_screen(DrawContext *dc, Game *g);
  * the canvas before the blit.
  */
 void draw_frame(DrawContext *dc, Game *g);
+
+/* Level-change fade (MAIN.ASM _next_level Shade_Off / Shade_On): darken the
+ * canvas to palette step 0..31 of DRAW.ASM init_shade. */
+void draw_canvas_fade(DrawContext *dc, int step);
+
+/* Draw only the background layer (background + border pillars) — what the
+ * screen shows while Shade_On fades the next level in. */
+void draw_background_to_canvas(DrawContext *dc, const Game *g);

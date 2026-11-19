@@ -90,6 +90,7 @@ void settings_defaults(GameConfig *cfg) {
     cfg->nbs_ball_start              = 2;     /* FILE.ASM:1137 nbs_ball_start dd 2 */
     cfg->start_level                 = 1;
     cfg->speed_delai                 = 1500;
+    cfg->max_balls                   = 20;    /* Ball_1..Ball_20, MAIN.ASM:7066-7085 */
 
     cfg->delai_between_option[0]     = 60;
     cfg->delai_between_option[1]     = 60;
@@ -171,6 +172,8 @@ int settings_load_cfg(GameConfig *cfg, const char *path) {
         if (ci_equal(key, "nbs_life"))               { cfg->nbs_ball_start   = vals[0] - 1; continue; }
         if (ci_equal(key, "start_level"))            { cfg->start_level      = vals[0]; continue; }
         if (ci_equal(key, "freq_change_speed"))      { cfg->speed_delai      = vals[0]; continue; }
+        /* Port addition: balls allowed in play at once (1999 game: 20). */
+        if (ci_equal(key, "max_balls"))              { cfg->max_balls        = vals[0]; continue; }
 
         /* 3-value per-difficulty tuples */
         if (ci_equal(key, "time_between_option")) {

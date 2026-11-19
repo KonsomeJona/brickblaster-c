@@ -379,6 +379,20 @@ static int bonus_extra_life_of(const Game *g) {
                                               : BONUS_EXTRA_LIFE;
 }
 
+/* Port addition: Blaster.cfg Max_Balls. 0 keeps the 1999 limit of 20 ball
+ * sprites (Ball_1..Ball_20, MAIN.ASM:7066-7085). Stored clamped so readers
+ * never index past the balls[] array. */
+void game_set_max_balls(Game *g, int max_balls) {
+    if (!g) return;
+    if (max_balls <= 0)             max_balls = 0;            /* default */
+    if (max_balls > BALLS_CAPACITY) max_balls = BALLS_CAPACITY;
+    g->cfg_max_balls = max_balls;
+}
+
+static int max_balls_of(const Game *g) {
+    return (g && g->cfg_max_balls > 0) ? g->cfg_max_balls : BALLS_DEFAULT_MAX;
+}
+
 static int compute_speed_level(const Game *g, int level_num) {
     int sl = speed_delai_of(g) - (level_num - 1) * 17;
     if (sl < 1) sl = 1;   /* clamp to at least 1 frame */
@@ -677,6 +691,7 @@ void game_load_level(Game *g, int level_num) {
     /* Clear per-player ball-lost pending flags on level change. */
     g->p1_ball_lost_pending = 0;
     g->p2_ball_lost_pending = 0;
+    g->respawn_timer        = 0;
 
     /* Init monster system for this level.
      * MAIN.ASM:2927  call init_Monster (selects sprite variant) */
@@ -885,6 +900,23 @@ static void sync_paddle_from_option(Game *g, int who) {
     p->has_gun    = (o == POWERUP_SHOOT || o == POWERUP_MINI_SHOOT); /* MAIN.ASM:1863-1866 */
     p->mini_laser = (o == POWERUP_MINI_SHOOT);
     if (!p->has_gun) p->gun_cooldown = 0;
+
+    /* Gun sprites. A newly carried gun restarts their animations, as
+     * option_shoot_p / option_mini_shoot_p do once per arming (guarded by
+     * init_big/mini_shoot_flag, which clear_cannon* resets when the option
+     * goes, MAIN.ASM:2041-2059 and 6509-6601); otherwise they age a frame. */
+    {
+        int kind = !p->has_gun ? 0 : (p->mini_laser ? 2 : 1);
+        if (kind != p->cannon_kind) {
+            p->cannon_kind     = kind;
+            p->cannon_tick_big = p->cannon_tick_l = p->cannon_tick_r = 0;
+            p->cannon_fire_l   = p->cannon_fire_r = 0;
+        } else if (kind) {
+            if (p->cannon_tick_big < 1000) p->cannon_tick_big++;
+            if (p->cannon_tick_l   < 1000) p->cannon_tick_l++;
+            if (p->cannon_tick_r   < 1000) p->cannon_tick_r++;
+        }
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -989,8 +1021,10 @@ static void spawn_extra_balls(Game *g, int count, int owner) {
         spawned++;
     }
 
-    /* Pass 2: append until count reached or array is full */
-    int end_cap = BALL_MAX + 1;
+    /* Pass 2: append until count reached or the ball limit is hit.
+     * add_ball (MAIN.ASM:1567-1583) stops when it walks off the last of the
+     * 20 Ball sprites; the port's last slot is Max_Balls from Blaster.cfg. */
+    int end_cap = max_balls_of(g);
     while (spawned < count && g->ball_count < end_cap) {
         create_ball_asm(g, &g->balls[g->ball_count], owner_paddle, owner);
         g->ball_count++;
@@ -1068,10 +1102,14 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
         spawn_extra_balls(g, 6, collected_by);
         break;
     case POWERUP_BALL_20:
-        /* MAIN.ASM:option_20_ball_p  mov ecx,20; call add_ball
-         * add_ball skips active slots without decrementing ecx → fills all
-         * inactive slots (up to 20 total). Equivalent to fill-to-max. */
-        if (g->ball_count < BALL_MAX + 1) spawn_extra_balls(g, BALL_MAX + 1 - g->ball_count, collected_by);
+        /* MAIN.ASM:6389-6392 option_20_ball_p  mov ecx,20 / call add_ball:
+         * up to 20 NEW balls, as many as there are free slots. With the
+         * stock 20 slots that fills every free one; with a larger Max_Balls
+         * each pickup adds 20 more. (The port used to request
+         * 20 - ball_count; ball_count includes slots of balls already lost,
+         * so with such gaps it spawned fewer balls than there were free
+         * slots and the screen never reached 20.) */
+        spawn_extra_balls(g, 20, collected_by);
         break;
 
     /* ------------------------------------------------------------------
@@ -1113,6 +1151,15 @@ static void apply_powerup(Game *g, PowerupType type, int collected_by) {
      * ------------------------------------------------------------------ */
     case POWERUP_NEXT_LEVEL:
         g->state = STATE_NEW_PLAY;  /* trigger level advance in main loop */
+        /* option_next_level_p is a bare ret; the same frame, detect_next_level
+         * sees current_option == option_next_level_o, clears it (@@next) and
+         * falls into @@end: play_sound iff_next_level (MAIN.ASM:4123-4147).
+         * So the pickup's iff_option (played by the caller, MAIN.ASM:5708) is
+         * followed by NEXT.wav, exactly as on a cleared level. The port only
+         * played the pickup sound. STEP 7 skips its own copy when the state
+         * is already NEW_PLAY, so a last brick broken that frame cannot play
+         * it a second time. */
+        if (g->audio) audio_play(g->audio, SFX_LEVEL_COMPLETE);
         break;
 
     /* ------------------------------------------------------------------
@@ -1750,132 +1797,128 @@ static void tick_speed_counter(Game *g) {
 }
 
 /* --------------------------------------------------------------------------
- * projectile_hit_brick — check one projectile against the brick grid.
- *
- * ASM ground truth: MAIN.ASM:1083  call refresh_shoot
- *   refresh_shoot iterates each active tir (projectile) and checks whether
- *   the tir's top-centre pixel falls inside a brick cell.  If so it calls
- *   detect_brique (MAIN.ASM:3947) which decrements HP and possibly destroys.
- *
- * Collision test (derived from MAIN.ASM:3947-4004  detect_brique):
- *   1. Convert projectile top-centre to grid col/row
- *      col = (px - bord_x) / brique_size_x      MAIN.ASM:3962  shr ebx,5
- *      row = (py - bord_y) / brique_size_y       MAIN.ASM:3969  shr eax,4
- *   2. Skip empty (absente, MAIN.ASM:3977) / invalid (invalide, MAIN.ASM:3979)
- *   3. Indestructible bricks bounce the projectile but take no damage
- *      (MAIN.ASM:3981  cmp al,incassable  jae @@collision)
- *   4. Normal bricks: dec HP (MAIN.ASM:3996  dec B [esi+ebx])
- *   5. Destroyed when HP==0 (MAIN.ASM:4004  cmp B,absente)
- *
- * The projectile is consumed (active=0) on ANY solid brick hit.
- * Transparent bricks are not solid — projectile passes through.
- *
- * Returns 1 if the projectile was consumed, 0 otherwise.
+ * projectile_hit_cell — detect_brique (MAIN.ASM:3947-4111) for a shot, at one
+ * sweep point. Returns 1 for a hit (`stc`), 0 for a miss (`clc`).
+ *   - outside the field (unsigned `jae` against limite_x / limite_y): miss;
+ *   - absente / invalide: miss;
+ *   - incassable / teleporteuse (`jae @@collision`): iff_incassable and the
+ *     reflet (MAIN.ASM:4052-4062), no damage, hit. (On a teleporter the ASM
+ *     teleports the shot itself — teleporte_ball on edx; not ported, the port
+ *     treats it as an indestructible brick, as before.)
+ *   - otherwise one hit per cell per sweep (level_flag), `dec` HP: a brick
+ *     that goes absente is scored and may drop an option (iff_normale); a
+ *     destroyed transparent brick is a miss (MAIN.ASM:4035-4042); one still
+ *     standing plays iff_multi (aliased to WALL) — hit.
  * -------------------------------------------------------------------------- */
-static int projectile_hit_brick(Game *g, Projectile *p)
+static int projectile_hit_cell(Game *g, Projectile *p, int x, int y,
+                               unsigned char *level_flag)
 {
-    int px, py, pw, col, row, idx;
+    int col, row, idx, destroyed;
     Brick *b;
-    int destroyed, score_delta;
 
-    /* Top-centre of projectile sprite — matches ASM sprite origin check.
-     * MAIN.ASM:3962  the x coordinate used is the centre of the sprite */
-    pw = p->is_big ? VAISSEAU_TIR_BIG_SIZE_X : VAISSEAU_TIR_SIZE_X;
-    px = p->x + pw / 2;
-    py = p->y;  /* top edge of projectile (moving upward) */
-
-    /* Bounds check: must be inside the play area brick grid.
-     * MAIN.ASM:3497  bord_x (112) .. limite_x (528) */
-    if (px < PLAY_X1 || px >= PLAY_X2) return 0;
-    if (py < PLAY_Y1 || py >= SCREEN_H) return 0;
-
-    /* Grid cell from pixel — MAIN.ASM:3962-3969 */
-    col = (px - BRICK_ORIGIN_X) / BRICK_W;   /* MAIN.ASM:3962  shr ebx,5 */
-    row = (py - BRICK_ORIGIN_Y) / BRICK_H;   /* MAIN.ASM:3969  shr eax,4 */
+    if (x < 0 || x >= PLAY_X2) return 0;   /* MAIN.ASM:3951  cmp ebx,limite_x / jae */
+    if (y < 0 || y >= PLAY_W)  return 0;   /* MAIN.ASM:3953  cmp eax,limite_y / jae */
+    col = x - PLAY_X1; if (col < 0) col = 0; col >>= 5;   /* MAIN.ASM:3958-3962 */
+    row = y - PLAY_Y1; if (row < 0) row = 0; row >>= 4;   /* MAIN.ASM:3965-3970 */
     idx = row * BRICK_COLS + col;
     if (idx < 0 || idx >= BRICK_COUNT) return 0;
 
     b = &g->bricks[idx];
-
-    /* Skip empty / invalid cells — MAIN.ASM:3977-3979 */
     if (!b->active || b->raw == ABSENTE || b->raw == INVALIDE) return 0;
 
-    /* Apply damage — MAIN.ASM:3996  dec B [esi+ebx] (damage = 1) */
-    destroyed = brick_hit(b, 1);
-
-    /* Sound — three cases, not two:
-     *   MAIN.ASM:4055  iff_incassable  → indestructible brick        (WALL)
-     *   MAIN.ASM:4032  iff_normale     → brick DESTROYED             (BOUNCE)
-     *   MAIN.ASM:4108  iff_multi       → brick damaged, still standing
-     * The last one is reached by `cmp B [esi+ebx],absente / jne @@redraw_brique`
-     * (MAIN.ASM:4004-4005): "multi" is a multi-HIT brick, not multi-ball. Its
-     * slot is aliased onto iff_incassable (FILE.ASM:744-746), so it is WALL. */
-    if (g->audio) {
-        if (b->type == BRICK_INDESTRUCTIBLE) audio_play(g->audio, SFX_WALL_HIT);
-        else if (destroyed)                  audio_play(g->audio, SFX_BRICK_HIT);
-        else                                 audio_play(g->audio, SFX_WALL_HIT);
+    if (b->type == BRICK_INDESTRUCTIBLE || b->type == BRICK_TELEPORTER) {
+        if (g->audio) audio_play(g->audio, SFX_WALL_HIT);
+        if (b->type == BRICK_INDESTRUCTIBLE) b->reflet_timer = NBS_REFLET;
+#if defined(BRICKBLASTER_MOBILE)
+        platform_vibrate(10);
+#endif
+        return 1;
     }
+
+    if (level_flag[idx]) return 0;          /* MAIN.ASM:3988-3991 */
+    level_flag[idx] = 1;
+
+    destroyed = brick_hit(b, 1);            /* MAIN.ASM:3996  dec B [esi+ebx] */
+    /* iff_normale when it goes, iff_multi (aliased onto WALL, FILE.ASM:744-746)
+     * when a multi-hit brick survives (MAIN.ASM:4004-4005, 4032, 4108). */
+    if (g->audio) audio_play(g->audio, destroyed ? SFX_BRICK_HIT : SFX_WALL_HIT);
 #if defined(BRICKBLASTER_MOBILE)
     platform_vibrate(10);
 #endif
 
-    /* Update raw level data so game_level_complete() stays accurate */
     if (destroyed) {
+        /* Keep the raw level data in step for game_level_complete(). */
         g->current_level.bricks[idx] = ABSENTE;
-    }
-
-    /* P0-ASM-1: projectile brick destruction uses inc_score helper
-     * (difficulty + night scaling + bonus-life trigger + +80 bonus).
-     * MAIN.ASM:4024-4026 call inc_score ecx=1. */
-    if (destroyed) {
+        /* MAIN.ASM:4024-4026  call inc_score, ecx=1, for the shot's owner. */
         inc_score(g, p->owner, 1);
-    }
-    (void)score_delta;  /* kept for compat; unused after helper */
 
-    /* Powerup spawn on destroy — MAIN.ASM:1067 detect_new_option
-     * FILE.ASM:1139  delai_between_option = 60 frames */
-    if (destroyed && g->powerup_count < MAX_POWERUPS_ACTIVE) {
-        int limit = powerup_spacing(g);
-        int spawn_ok = g->dev_test || (g->option_spawn_timer >= limit);
-        if (spawn_ok) {
-            /* F6-01: consult cfg-injected freq table first, fall back to
-             * hardcoded powerup_freq_table[] if no override present. */
-            PowerupType pt = g->dev_test ? dev_next_powerup(g)
-                                         : pick_powerup_cfg(g);
-            /* Iter3-B: MAIN.ASM:5466-5468  cmp delai_random_option,eax /
-             * jb @@end / mov delai_random_option,Off — the window is
-             * consumed BEFORE the frequency roll, so a failed draw still
-             * resets the counter. */
-            g->option_spawn_timer = 0;
-            if (pt < POWERUP_COUNT) {
-                int bx = level_brick_x(idx);
-                int by = level_brick_y(idx);
-                powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
-                /* F5 P1-ASM-35: tag with destroyer's owner (projectile path). */
-                g->powerups[g->powerup_count].owner = p->owner;
-                g->powerup_count++;
+        /* Powerup spawn on destroy — MAIN.ASM:1067 detect_new_option
+         * FILE.ASM:1139  delai_between_option = 60 frames */
+        if (destroyed && g->powerup_count < MAX_POWERUPS_ACTIVE) {
+            int limit = powerup_spacing(g);
+            int spawn_ok = g->dev_test || (g->option_spawn_timer >= limit);
+            if (spawn_ok) {
+                /* F6-01: consult cfg-injected freq table first, fall back to
+                 * hardcoded powerup_freq_table[] if no override present. */
+                PowerupType pt = g->dev_test ? dev_next_powerup(g)
+                                             : pick_powerup_cfg(g);
+                /* Iter3-B: MAIN.ASM:5466-5468  cmp delai_random_option,eax /
+                 * jb @@end / mov delai_random_option,Off — the window is
+                 * consumed BEFORE the frequency roll, so a failed draw still
+                 * resets the counter. */
+                g->option_spawn_timer = 0;
+                if (pt < POWERUP_COUNT) {
+                    int bx = level_brick_x(idx);
+                    int by = level_brick_y(idx);
+                    powerup_init(&g->powerups[g->powerup_count], pt, bx, by);
+                    /* F5 P1-ASM-35: tag with destroyer's owner (projectile path). */
+                    g->powerups[g->powerup_count].owner = p->owner;
+                    g->powerup_count++;
+                }
             }
         }
-    }
 
-    /* Big shoot pierces EVERYTHING, indestructible bricks included; it only
-     * ends at the top wall. It is spawned with `mov [edx.sprite_rebond],Off`
-     * (MAIN.ASM:1946), detect_colision_brique refuses to set new_direction for
-     * a rebond-Off sprite (`cmp [edx.sprite_rebond],Off / je @@cont`,
-     * MAIN.ASM:3863-3864), and change_direction returns at `cmp
-     * new_direction,Off / je @@end` (MAIN.ASM:3908-3909) — so it never reaches
-     * @@shoot_off, the only place a shot is destroyed. The port used to
-     * consume it on an indestructible brick.
-     * Mini shoot keeps rebond On, so it does set new_direction and dies at
-     * @@shoot_off; transparent cells are pass-through as for the ball. */
-    if (p->is_big) {
-        return 0;   /* projectile survives, keeps moving up */
+        if (b->type == BRICK_TRANSPARENT) return 0;
     }
-    if (!p->is_big && b->type == BRICK_TRANSPARENT) {
-        return 0;   /* mini projectile passes through transparents */
-    }
-    p->active = 0;
     return 1;
+}
+
+/* --------------------------------------------------------------------------
+ * projectile_sweep_bricks — detect_colision_brique (MAIN.ASM:3831-3888) for a
+ * shot, as Refresh_Shoot calls it before move_ball (MAIN.ASM:2903-2918).
+ *
+ * A shot moves with sens (0, -4) (MAIN.ASM:1932-1934), so
+ * calc_coordonnee_de_depart (MAIN.ASM:3601-3705) takes its mode-2 corner
+ * pair: top-left (x, y) and bottom-right (x + size_x, y + size_y), with the
+ * shot's own sprite size — 8x42 big, 3x13 mini (Blaster.inc:108-116). Each
+ * corner is walked |sens| + 1 = 5 sub-steps; sub-step 0 is the out-of-field
+ * quirk of create_table_de_trajectoire (see build_trajectory_axis in
+ * collision.c), so the tests fall 1..4 px ahead. One level_flag per sweep.
+ *
+ * Two corners 8 px apart: aim the big shot so a brick seam falls between
+ * them, and the top corner breaks the left brick while the bottom one, 42 px
+ * lower, breaks the right — two bricks with one rocket, as in 1999. The port
+ * tested a single centre point, so it never could.
+ *
+ * Any hit ends a mini shot once the sweep is done (change_direction →
+ * @@shoot_off, MAIN.ASM:3907-3939). The big shot has sprite_rebond Off
+ * (MAIN.ASM:1946), never sets new_direction (MAIN.ASM:3863-3864) and keeps
+ * going through everything until the top wall.
+ * -------------------------------------------------------------------------- */
+#define SHOT_SPEED 4    /* MAIN.ASM:1933  mov [edx.sprite_sens_y],-4 */
+static void projectile_sweep_bricks(Game *g, Projectile *p)
+{
+    unsigned char level_flag[BRICK_COUNT];
+    int w = p->is_big ? SHOOT_W : MINI_SHOOT_W;
+    int h = p->is_big ? SHOOT_H : MINI_SHOOT_H;
+    int s, hit = 0;
+
+    memset(level_flag, 0, sizeof(level_flag));
+    for (s = 1; s <= SHOT_SPEED; s++) {
+        hit |= projectile_hit_cell(g, p, p->x,     p->y - s,     level_flag);
+        hit |= projectile_hit_cell(g, p, p->x + w, p->y + h - s, level_flag);
+    }
+    if (hit && !p->is_big) p->active = 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -2016,14 +2059,22 @@ void game_update(Game *g, const FrameInput *input) {
      * explosion on both paddles.  When a paddle's explo_timer reaches 0
      * and there's no ball in play yet, spawn the replacement (deferred
      * from handle_life_lost). */
+    /* destroy_vaisseau's closing pause (RESPAWN_PAUSE_FRAMES): serve when
+     * it runs out — start_game / init_first_ball in the ASM. */
+    if (g->respawn_timer > 0 && --g->respawn_timer == 0 &&
+        g->state == STATE_READY_TO_PLAY_AGAIN && g->ball_count == 0) {
+        game_spawn_ball(g);
+    }
     Paddle *paddles_anim[2] = { &g->paddle, &g->paddle_2 };
     for (i = 0; i < 2; i++) {
         if (paddles_anim[i]->explo_timer > 0) {
             paddles_anim[i]->explo_timer--;
+            /* Explosion over: the ship is deleted and the 75-frame pause
+             * starts. The serve used to happen right here. */
             if (paddles_anim[i]->explo_timer == 0 &&
                 g->state == STATE_READY_TO_PLAY_AGAIN &&
                 g->ball_count == 0) {
-                game_spawn_ball(g);
+                g->respawn_timer = RESPAWN_PAUSE_FRAMES;
             }
         }
         /* MAIN.ASM:2420-2460 Init_Cursor_Telepod — telepod paddle anim. */
@@ -2184,8 +2235,21 @@ void game_update(Game *g, const FrameInput *input) {
     {
         int p1_fire = fire_pressed;
         int p2_fire = (g->game_mode > 0) ? input->p2_fire : 0;
+        /* Only a served ball can be launched. After a lost life the ASM is
+         * still inside destroy_vaisseau (explosion + RESPAWN_PAUSE_FRAMES)
+         * and never reaches detect_start_game; the port read the click
+         * anyway, switched to PLAYING with no ball, and the deferred serve
+         * (READY_TO_PLAY_AGAIN only) never came: no ball, forever. */
+        int serve_ready = (g->paddle.explo_timer == 0 &&
+                           g->paddle_2.explo_timer == 0 &&
+                           g->respawn_timer == 0);
+        if (serve_ready) {
+            int has_ball = 0;
+            for (i = 0; i < g->ball_count; i++) has_ball |= g->balls[i].active;
+            serve_ready = has_ball;
+        }
         if ((g->state == STATE_READY_TO_PLAY || g->state == STATE_READY_TO_PLAY_AGAIN)
-            && (p1_fire || p2_fire)) {
+            && serve_ready && (p1_fire || p2_fire)) {
             /* Launch ball(s): MAIN.ASM:5290  mov game_mode,PLAYING */
             g->state = STATE_PLAYING;
             int launch_vx, launch_vy;
@@ -2248,7 +2312,8 @@ void game_update(Game *g, const FrameInput *input) {
          * for the explosion, and serve through game_spawn_ball so both players
          * and both owner tags are set. */
         int explo_pending = (g->paddle.explo_timer > 0 ||
-                             g->paddle_2.explo_timer > 0);
+                             g->paddle_2.explo_timer > 0 ||
+                             g->respawn_timer > 0);
         if (!explo_pending && (g->ball_count < 1 || !g->balls[0].active)) {
             game_spawn_ball(g);
         }
@@ -2329,6 +2394,35 @@ void game_update(Game *g, const FrameInput *input) {
         }
     }
 
+    /* Port addition (not in the 1999 game): N behaves exactly as catching
+     * the next-level bonus — the pickup's iff_option (MAIN.ASM:5708), then
+     * the bonus handler, which wipes the option slots, plays iff_next_level
+     * and switches to NEW_PLAY; the main loop then loads the next level and
+     * shows "ready ?". No +20 pickup points: nothing was caught. The rest of
+     * this frame is skipped, like the level-complete exit in STEP 7, so a
+     * ball cannot be lost after the level has already been left. */
+    if (input->next_level_pressed && g->state == STATE_PLAYING && !g->demo_active) {
+        if (g->audio) audio_play(g->audio, SFX_POWERUP_COLLECT);
+        apply_powerup(g, POWERUP_NEXT_LEVEL, 0);
+        return;
+    }
+
+    /* Port addition (not in the 1999 game): T jumps every free ball to a
+     * random spot, exactly like the telepod bonus does, so a ball stuck in
+     * a repeating loop can be knocked out of it. Speed and direction are
+     * kept. Balls held by a magnetic paddle are left alone. */
+    if (input->teleport_pressed && g->state == STATE_PLAYING && !g->demo_active) {
+        int tj, any = 0;
+        for (tj = 0; tj < g->ball_count; tj++) {
+            Ball *tb = &g->balls[tj];
+            if (!tb->active || tb->is_magnetic || tb->telepod_timer > 0) continue;
+            teleport_ball_random(g, tb);
+            tb->telepod_timer = DELAI_TELEPOD;
+            any = 1;
+        }
+        if (any && g->audio) audio_play(g->audio, SFX_TELEPOD);
+    }
+
     /* =======================================================================
      * STEP 2b: Paddle shooting — fire projectiles when gun is active.
      * MAIN.ASM:1083  call refresh_shoot / detect_shoot_player_1
@@ -2392,8 +2486,12 @@ void game_update(Game *g, const FrameInput *input) {
                 if (g->paddle.gun_side) {
                     /* MAIN.ASM:1987  add eax,vaisseau_decal_x_r+6 */
                     p->x = g->paddle.x + VAISSEAU_DECAL_X_R + 6;
+                    /* MAIN.ASM:1988-1995 restart that cannon's recoil */
+                    g->paddle.cannon_tick_r = 0; g->paddle.cannon_fire_r = 1;
                 } else {
                     p->x = g->paddle.x + VAISSEAU_DECAL_X_L;
+                    /* MAIN.ASM:1998-2006 */
+                    g->paddle.cannon_tick_l = 0; g->paddle.cannon_fire_l = 1;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;
@@ -2448,8 +2546,10 @@ void game_update(Game *g, const FrameInput *input) {
                 g->paddle_2.gun_side ^= 1;
                 if (g->paddle_2.gun_side) {
                     p->x = g->paddle_2.x + VAISSEAU_DECAL_X_R + 6;
+                    g->paddle_2.cannon_tick_r = 0; g->paddle_2.cannon_fire_r = 1;
                 } else {
                     p->x = g->paddle_2.x + VAISSEAU_DECAL_X_L;
+                    g->paddle_2.cannon_tick_l = 0; g->paddle_2.cannon_fire_l = 1;
                 }
                 p->vy = -VAISSEAU_TIR_SPEED;
                 p->active = 1;
@@ -2755,6 +2855,27 @@ void game_update(Game *g, const FrameInput *input) {
         }
         (void)score_delta;  /* unused — kept for minimal-diff compat */
 
+        /* Iron ball through a teleporter. detect_brique jumps to
+         * @@teleportation for ANY sprite touching a teleporteuse cell
+         * (MAIN.ASM:4052-4053, 4068-4073) — only the BOUNCE is gated on
+         * sprite_rebond. check_brick_at_point reports that touch for an iron
+         * ball in hit_indices but returns "no bounce", so bc.hit stays 0 and
+         * the teleporter branch above never ran: iron balls flew straight
+         * through. Done here, after the bricks it smashed this frame have
+         * been scored. */
+        if (g->balls[i].is_iron) {
+            int ti;
+            for (ti = 0; ti < bc.hit_count; ti++) {
+                int tidx = bc.hit_indices[ti];
+                if (tidx < 0 || tidx >= BRICK_COUNT) continue;
+                if (g->bricks[tidx].type != BRICK_TELEPORTER) continue;
+                teleport_ball_random(g, &g->balls[i]);
+                g->balls[i].telepod_timer = DELAI_TELEPOD;
+                if (g->audio) audio_play(g->audio, SFX_TELEPOD);
+                break;
+            }
+        }
+
         /* Move ball forward by velocity.
          * MAIN.ASM:3250-3256  pos_x += sens_x; pos_y += sens_y */
         ball_move(&g->balls[i]);
@@ -2907,14 +3028,18 @@ void game_update(Game *g, const FrameInput *input) {
     /* Projectile-monster collision: projectiles also destroy monsters */
     for (i = 0; i < g->proj_count; i++) {
         if (!g->projectiles[i].active) continue;
-        int pw = g->projectiles[i].is_big ? VAISSEAU_TIR_BIG_SIZE_X : VAISSEAU_TIR_SIZE_X;
-        int ph = g->projectiles[i].is_big ? VAISSEAU_TIR_BIG_SIZE_Y : VAISSEAU_TIR_SIZE_Y;
+        /* _detect_colision_monster (MAIN.ASM:3174-3197) tests the shot's
+         * centre, pos + size/2 on each axis, against the monster box with
+         * both edges included (`jb` / `ja`). The shot is 8x42 big, 3x13
+         * mini (Blaster.inc:108-116); the port used x+6 and the top edge. */
+        int pw  = g->projectiles[i].is_big ? SHOOT_W : MINI_SHOOT_W;
+        int ph  = g->projectiles[i].is_big ? SHOOT_H : MINI_SHOOT_H;
         int pcx = g->projectiles[i].x + pw / 2;
-        int pcy = g->projectiles[i].y;
+        int pcy = g->projectiles[i].y + ph / 2;
         for (j = 0; j < NBS_MONSTER; j++) {
             if (!g->monsters[j].active) continue;
-            if (pcx >= g->monsters[j].x && pcx < g->monsters[j].x + MONSTER_W &&
-                pcy >= g->monsters[j].y && pcy < g->monsters[j].y + MONSTER_H) {
+            if (pcx >= g->monsters[j].x && pcx <= g->monsters[j].x + MONSTER_W &&
+                pcy >= g->monsters[j].y && pcy <= g->monsters[j].y + MONSTER_H) {
                 monster_kill(&g->monsters[j]);
                 /* Only the mini shoot dies here. _detect_colision_monster does
                  *     cmp [edx.sprite_rebond],Off / je @@cont
@@ -2948,13 +3073,14 @@ void game_update(Game *g, const FrameInput *input) {
      * ======================================================================= */
     for (i = 0; i < g->proj_count; i++) {
         if (!g->projectiles[i].active) continue;
-        g->projectiles[i].y -= 4;   /* Blaster.inc:242 vaisseau_tir_speed=1 but at 60fps
-                                     * 1px/frame is slower than the ball (vy≈3).
-                                     * 4px/frame matches original feel. */
+        /* Refresh_Shoot (MAIN.ASM:2903-2918): the brick sweep looks along
+         * the move, only while game_mode == PLAYING, then move_ball. */
+        if (g->state == STATE_PLAYING)
+            projectile_sweep_bricks(g, &g->projectiles[i]);
+        if (!g->projectiles[i].active) continue;
+        g->projectiles[i].y -= SHOT_SPEED;  /* sens_y = -4, MAIN.ASM:1933 */
         if (g->projectiles[i].y + VAISSEAU_TIR_SIZE_Y < 0) {
             g->projectiles[i].active = 0;
-        } else if (g->projectiles[i].active) {
-            projectile_hit_brick(g, &g->projectiles[i]);
         }
     }
 
@@ -3061,9 +3187,11 @@ void game_update(Game *g, const FrameInput *input) {
      * MAIN.ASM:1094-1095  call detect_next_level; jnc next_level
      * ======================================================================= */
     if (game_level_complete(g)) {
+        /* A next-level bonus collected this frame already played it. */
+        int already_next = (g->state == STATE_NEW_PLAY);
         g->state = STATE_NEW_PLAY;
         /* P1-ASM-31: MAIN.ASM:4141 play_sound iff_next_level on level advance */
-        if (g->audio) audio_play(g->audio, SFX_LEVEL_COMPLETE);
+        if (g->audio && !already_next) audio_play(g->audio, SFX_LEVEL_COMPLETE);
 #if defined(BRICKBLASTER_MOBILE)
         platform_vibrate(200);
 #endif
