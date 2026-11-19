@@ -395,6 +395,41 @@ static void t_click_before_the_serve_is_ignored(void) {
     CHECK(1);
 }
 
+/* Fire one shot straight up at column x through two adjacent 1-hit bricks
+ * (row 10, columns 5 and 6, seam at x = 304). Returns bit 0 = left gone,
+ * bit 1 = right gone. */
+static int shoot_at_seam(int big, int x) {
+    Game g; boot(&g, 0);
+    int i, f, a = 10 * BRICK_COLS + 5, b = a + 1;
+    unsigned char raw = BRICK_COLOR_BLUE | BRICK_NORMAL | 1;
+    for (i = 0; i < BRICK_COUNT; i++) { brick_init(&g.bricks[i], i, ABSENTE); g.current_level.bricks[i] = ABSENTE; }
+    brick_init(&g.bricks[a], a, raw); g.current_level.bricks[a] = raw;
+    brick_init(&g.bricks[b], b, raw); g.current_level.bricks[b] = raw;
+    brick_init(&g.bricks[0], 0, raw); g.current_level.bricks[0] = raw;   /* level stays open */
+    g.balls[0].active = 0; g.ball_count = 0;
+    memset(&g.projectiles[0], 0, sizeof(g.projectiles[0]));
+    g.projectiles[0].active = 1; g.projectiles[0].is_big = big;
+    g.projectiles[0].x = x; g.projectiles[0].y = 300; g.proj_count = 1;
+    FrameInput fi = idle_input();
+    for (f = 0; f < 200 && g.proj_count; f++) { g.state = STATE_PLAYING; game_update(&g, &fi); }
+    return (!g.bricks[a].active) | ((!g.bricks[b].active) << 1);
+}
+
+static void t_big_shot_splits_a_seam(void) {
+    begin("big shot: two corners, two bricks across a seam (MAIN.ASM:3601-3705, 3831-3888)");
+    /* detect_colision_brique tests the shot's top-left (x) and bottom-right
+     * (x + 8) corners, so a seam with x < 304 <= x + 8 is hit on both sides. */
+    int x, ok = 1;
+    for (x = 270; x <= 320; x++) {
+        int want = (x < 304 && 304 <= x + SHOOT_W) ? 3 : (x < 304 ? 1 : 2);
+        if (shoot_at_seam(1, x) != want) ok = 0;
+    }
+    CHECK(ok);
+    /* A mini shot dies after its first sweep with a hit: one brick only. */
+    CHECK(shoot_at_seam(0, 302) == 1);
+    CHECK(shoot_at_seam(0, 304) == 2);
+}
+
 int main(void) {
     printf("BrickBlaster — instrumental parity tests\n\n");
 
@@ -414,6 +449,7 @@ int main(void) {
     t_bonus_life_steps_by_the_cfg_value();
     t_life_lost_serves_both_players_again();
     t_click_before_the_serve_is_ignored();
+    t_big_shot_splits_a_seam();
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

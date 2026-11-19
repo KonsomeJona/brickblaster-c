@@ -822,17 +822,15 @@ static void draw_projectiles(DrawContext *dc, const Game *g) {
         /* Projectile sprites are shared across players — MAIN.ASM tags
          * sprite_player on the fired entity for scoring attribution, but
          * visually both players shoot the same `shoot` / `mini_shoot`
-         * graphic.  Center the narrower sprite on the paddle-relative
-         * spawn point (game.c places p->x with vaisseau_tir's 12px width
-         * in mind; the real projectile is 3 or 8 wide). */
+         * graphic. Drawn at the shot's own position, as Draw_sprites does
+         * with sprite_pos_x/y: game.c already places p->x the ASM way
+         * (MAIN.ASM:1949-1954, 1984-2007), and the brick sweep and monster
+         * test work from that same x. The port used to shift the sprite
+         * right by 2 (big) / 4 (mini) px to "centre" it, which would put
+         * what you aim with off what gets tested. Whole pixels, so no
+         * half-texel bleed of the sheet's orange frame border. */
         Rectangle src = p->is_big ? SR_PROJ_BIG : SR_PROJ_MINI;
-        int pad_w     = p->is_big ? 13 : 12;         /* cannon sprite width */
-        /* Whole pixels only. (13-8)/2 = 2.5 put the big shot on a half-pixel
-         * x, and with nearest-neighbour sampling some GPUs then read texel
-         * column 443 of the sheet — the solid orange frame border just left
-         * of shoot_o — drawing a 1x42 orange line beside the rocket. */
-        int offset    = (pad_w - (int)src.width) / 2;
-        Vector2 pos   = { (float)(p->x + offset), (float)p->y };
+        Vector2 pos   = { (float)p->x, (float)p->y };
         DrawTextureRec(dc->assets->sprite_sheet, src, pos, WHITE);
     }
 }
